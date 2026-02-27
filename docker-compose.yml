@@ -1,0 +1,72 @@
+# InkDrip + RSSHub + FreshRSS
+#
+# Usage:
+#   1. Copy config.example.toml to data/config.toml and adjust settings
+#   2. docker compose up -d
+#   3. Subscribe to feeds at http://localhost:8080/feeds/<slug>/atom.xml (or rss.xml for RSS 2.0 format)
+
+services:
+  db:
+    image: postgres:15-alpine
+    container_name: postgres
+    environment:
+      - POSTGRES_USER=freshrss
+      - POSTGRES_PASSWORD=freshrss_secret
+      - POSTGRES_DB=freshrss
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    deploy:
+      resources:
+        limits:
+          memory: 150M
+    restart: always
+
+  rsshub:
+    image: diygod/rsshub:latest
+    container_name: rsshub
+    ports:
+      - 1200:1200
+    environment:
+      - NODE_ENV=production
+      - CACHE_TYPE=memory
+      - DEBUG_INFO=false
+    deploy:
+      resources:
+        limits:
+          memory: 200M
+    restart: always
+
+  freshrss:
+    image: freshrss/freshrss
+    container_name: freshrss
+    ports:
+      - 8081:80
+    environment:
+      - TZ=Asia/Shanghai
+      - CRON_MIN=1,31
+    volumes:
+      - freshrss-data:/var/www/FreshRSS/data
+      - freshrss-extensions:/var/www/FreshRSS/extensions
+    depends_on:
+      - db
+    restart: always
+
+  inkdrip:
+    image: inkdrip:latest
+    build: .
+    container_name: inkdrip
+    ports:
+      - 8080:8080
+    volumes:
+      - inkdrip-data:/data
+    environment:
+      - INKDRIP__SERVER__BASE_URL=http://localhost:8080
+      - INKDRIP__DEFAULTS__TIMEZONE=Asia/Shanghai
+    deploy:
+      resources:
+        limits:
+          memory: 50M
+    restart: always
+
+volumes:
+  inkdrip-data:

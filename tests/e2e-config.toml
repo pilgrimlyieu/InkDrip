@@ -1,0 +1,40 @@
+# InkDrip E2E test server configuration.
+# Used exclusively by tests/e2e.py via INKDRIP_CONFIG env var.
+
+[server]
+host = "127.0.0.1"
+port = 18080
+base_url = "http://localhost:18080"
+api_token = "e2etest"
+
+[storage]
+data_dir = "./data-test"
+
+[defaults]
+words_per_day = 3000
+target_segment_words = 1500
+max_segment_words = 2000
+# Low minimum so fixture chapters (< 500 words) remain as individual segments.
+min_segment_words = 100
+delivery_time = "08:00"
+timezone = "UTC"
+# No days skipped; accepts an array of day names (e.g. ["saturday", "sunday"]).
+skip_days = []
+
+[parser.txt]
+chapter_separator = "^={3,}$"
+paragraph_separator = "\n\n"
+
+[watch]
+enabled = false
+dir = "./books"
+auto_create_feed = false
+scan_interval_secs = 3600
+
+[transforms]
+reading_progress = true
+custom_css = ""
+
+[feed]
+format = "atom"
+items_limit = 50

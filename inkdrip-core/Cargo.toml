@@ -1,0 +1,40 @@
+[package]
+name = "inkdrip-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Core library for InkDrip: parsing, splitting, scheduling"
+
+[dependencies]
+anyhow.workspace = true
+bitflags.workspace = true
+chrono.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+
+# EPUB parsing
+epub = "2"
+
+# Markdown parsing
+pulldown-cmark = "0.13"
+
+# HTML sanitization
+ammonia = "4"
+
+# Unicode text segmentation
+unicode-segmentation = "1"
+
+# Regex for TXT parser patterns
+regex = "1"
+
+# Atom/RSS feed generation
+atom_syndication = "0.12"
+rss = "2"
+
+# Async trait support
+async-trait = "0.1"
+
+[lints]
+workspace = true

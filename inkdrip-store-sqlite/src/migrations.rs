@@ -1,0 +1,109 @@
+use rusqlite::Connection;
+
+use inkdrip_core::error::{InkDripError, Result};
+
+/// Current schema version.
+const SCHEMA_VERSION: u32 = 1;
+
+/// Run all pending database migrations.
+pub fn run_migrations(conn: &Connection) -> Result<()> {
+    let current_version = get_schema_version(conn)?;
+
+    if current_version < 1 {
+        migrate_v1(conn)?;
+    }
+
+    set_schema_version(conn, SCHEMA_VERSION)?;
+    tracing::info!("Database schema at version {SCHEMA_VERSION}");
+    Ok(())
+}
+
+fn get_schema_version(conn: &Connection) -> Result<u32> {
+    let version: u32 = conn
+        .pragma_query_value(None, "user_version", |row| row.get(0))
+        .map_err(|e| InkDripError::StorageError(format!("Failed to get schema version: {e}")))?;
+    Ok(version)
+}
+
+fn set_schema_version(conn: &Connection, version: u32) -> Result<()> {
+    conn.pragma_update(None, "user_version", version)
+        .map_err(|e| InkDripError::StorageError(format!("Failed to set schema version: {e}")))?;
+    Ok(())
+}
+
+/// Migration v1: Initial schema.
+fn migrate_v1(conn: &Connection) -> Result<()> {
+    tracing::info!("Running migration v1: initial schema");
+
+    conn.execute_batch(
+        "
+        CREATE TABLE IF NOT EXISTS books (
+            id TEXT PRIMARY KEY,
+            title TEXT NOT NULL,
+            author TEXT NOT NULL DEFAULT 'Unknown',
+            format TEXT NOT NULL,
+            file_hash TEXT NOT NULL,
+            file_path TEXT NOT NULL,
+            total_words INTEGER NOT NULL DEFAULT 0,
+            total_segments INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_books_file_hash ON books(file_hash);
+
+        CREATE TABLE IF NOT EXISTS segments (
+            id TEXT PRIMARY KEY,
+            book_id TEXT NOT NULL REFERENCES books(id) ON DELETE CASCADE,
+            idx INTEGER NOT NULL,
+            title_context TEXT NOT NULL,
+            content_html TEXT NOT NULL,
+            word_count INTEGER NOT NULL,
+            cumulative_words INTEGER NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_segments_book_id ON segments(book_id);
+        CREATE INDEX IF NOT EXISTS idx_segments_book_idx ON segments(book_id, idx);
+
+        CREATE TABLE IF NOT EXISTS feeds (
+            id TEXT PRIMARY KEY,
+            book_id TEXT NOT NULL REFERENCES books(id) ON DELETE CASCADE,
+            slug TEXT NOT NULL UNIQUE,
+            schedule_config TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'active',
+            created_at TEXT NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_feeds_book_id ON feeds(book_id);
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_feeds_slug ON feeds(slug);
+
+        CREATE TABLE IF NOT EXISTS segment_releases (
+            segment_id TEXT NOT NULL REFERENCES segments(id) ON DELETE CASCADE,
+            feed_id TEXT NOT NULL REFERENCES feeds(id) ON DELETE CASCADE,
+            release_at TEXT NOT NULL,
+            PRIMARY KEY (segment_id, feed_id)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_releases_feed_time ON segment_releases(feed_id, release_at);
+
+        CREATE TABLE IF NOT EXISTS aggregate_feeds (
+            id TEXT PRIMARY KEY,
+            slug TEXT NOT NULL UNIQUE,
+            title TEXT NOT NULL,
+            description TEXT NOT NULL DEFAULT '',
+            include_all INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL
+        );
+
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_aggregate_feeds_slug ON aggregate_feeds(slug);
+
+        CREATE TABLE IF NOT EXISTS aggregate_feed_sources (
+            aggregate_id TEXT NOT NULL REFERENCES aggregate_feeds(id) ON DELETE CASCADE,
+            feed_id TEXT NOT NULL REFERENCES feeds(id) ON DELETE CASCADE,
+            PRIMARY KEY (aggregate_id, feed_id)
+        );
+        ",
+    )
+    .map_err(|e| InkDripError::StorageError(format!("Migration v1 failed: {e}")))?;
+
+    Ok(())
+}

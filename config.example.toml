@@ -1,0 +1,79 @@
+# InkDrip Configuration
+# Copy this file to config.toml and adjust as needed.
+# All values shown are defaults.
+
+[server]
+# Address to bind the HTTP server.
+host = "0.0.0.0"
+port = 8080
+# Public base URL used in feed links and image references.
+# Set this to your actual server address when deployed.
+base_url = "http://localhost:8080"
+# API token for management endpoints. Leave empty to disable auth.
+api_token = ""
+
+[storage]
+# Directory for database, uploaded books, and extracted images.
+data_dir = "./data"
+
+[defaults]
+# Default words to release per day for new feeds.
+words_per_day = 3000
+# Target word count per segment during splitting.
+target_segment_words = 1500
+# Maximum word count per segment (will try not to exceed).
+max_segment_words = 2000
+# Minimum word count per segment (avoids tiny trailing segments).
+min_segment_words = 500
+# Default daily delivery time (HH:MM, 24-hour format).
+delivery_time = "08:00"
+# Timezone for delivery time calculation.
+# Supports: "UTC", "UTC+N", "Asia/Shanghai", "America/New_York", etc.
+timezone = "Asia/Shanghai"
+# Days of the week to skip releases on.
+# Accepts an array of day names (full or abbreviated, case-insensitive).
+# Available values: "monday" ("mon"), "tuesday" ("tue"), "wednesday" ("wed"),
+#                   "thursday" ("thu"), "friday" ("fri"), "saturday" ("sat"), "sunday" ("sun")
+# Example: skip_days = ["saturday", "sunday"]  — skip weekends
+skip_days = []
+
+[parser.txt]
+# Regex pattern for chapter separators.
+chapter_separator = "^={3,}$"
+# Paragraph separator.
+paragraph_separator = "\n\n"
+
+[watch]
+# Enable automatic file watching and import.
+enabled = false
+# Directory to watch for new book files.
+dir = "./books"
+# Automatically create a feed when a new book is detected.
+auto_create_feed = true
+# How often to scan the directory (seconds).
+scan_interval_secs = 300
+
+[transforms]
+# Append reading progress indicator (e.g. "[42% · 12/28]") to each segment.
+reading_progress = true
+# Custom CSS to inject into segment HTML content.
+custom_css = ""
+# External command for custom content transformation (advanced).
+# The command receives segment HTML via stdin and should output transformed HTML to stdout.
+# external_command = "python my_transform.py"
+
+[feed]
+# Default feed format: "atom" or "rss".
+format = "atom"
+# Maximum number of items returned per feed request.
+items_limit = 50
+
+# Aggregate feeds combine multiple feeds into a single unified feed.
+# Define aggregates here or manage them via the API.
+#
+# [[aggregates]]
+# slug = "daily-reading"
+# title = "Daily Reading"
+# description = "All my book feeds combined"
+# include_all = false        # true = include all feeds automatically
+# feeds = ["feed-slug-1", "feed-slug-2"]

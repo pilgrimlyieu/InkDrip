@@ -1,0 +1,25 @@
+# Rust build artifacts
+/target/
+**/*.rs.bk
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Data directory (runtime)
+/data/
+/data-test/
+
+/tests/e2e*
+
+# Environment
+.env
+
+books
+AGENTS.md

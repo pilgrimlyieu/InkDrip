@@ -1,0 +1,21 @@
+[package]
+name = "inkdrip-store-sqlite"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "SQLite storage backend for InkDrip"
+
+[dependencies]
+anyhow.workspace = true
+chrono.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+inkdrip-core.workspace = true
+async-trait = "0.1"
+tokio.workspace = true
+rusqlite = { version = "0.38", features = ["bundled"] }
+
+[lints]
+workspace = true

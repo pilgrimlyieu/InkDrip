@@ -1,0 +1,29 @@
+[package]
+name = "inkdrip-server"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "HTTP server for InkDrip"
+
+[dependencies]
+anyhow.workspace = true
+chrono.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+inkdrip-core.workspace = true
+inkdrip-store-sqlite.workspace = true
+
+# Web framework
+axum = { version = "0.8", features = ["multipart"] }
+tower-http = { version = "0.6", features = ["cors", "trace", "fs"] }
+
+# Configuration
+toml = "0.9"
+figment = { version = "0.10", features = ["toml", "env"] }
+
+[lints]
+workspace = true

@@ -1,0 +1,105 @@
+[workspace]
+resolver = "2"
+members = [
+    "inkdrip-core",
+    "inkdrip-store-sqlite",
+    "inkdrip-server",
+    "inkdrip-cli",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+repository = "https://github.com/pilgrimlyieu/InkDrip"
+description = "Turn books into RSS feeds — drip-feed your reading"
+
+[workspace.dependencies]
+# Shared dependencies across workspace crates
+anyhow = "1"
+bitflags = { version = "2", features = ["serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+tokio = { version = "1", features = ["rt-multi-thread"] }
+tracing = "0.1"
+
+# Internal crates
+inkdrip-core = { path = "inkdrip-core" }
+inkdrip-store-sqlite = { path = "inkdrip-store-sqlite" }
+
+[workspace.lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+
+as_underscore = "deny"
+dbg_macro = "deny"
+expect_used = "deny"
+indexing_slicing = "deny"
+lossy_float_literal = "deny"
+panic = "deny"
+print_stderr = "deny"
+print_stdout = "deny"
+todo = "deny"
+unimplemented = "deny"
+unwrap_used = "deny"
+
+absolute_paths = "warn"
+alloc_instead_of_core = "warn"
+allow_attributes = "warn"
+assertions_on_result_states = "warn"
+cognitive_complexity = "warn"
+create_dir = "warn"
+decimal_literal_representation = "warn"
+empty_enum_variants_with_brackets = "warn"
+empty_structs_with_brackets = "warn"
+filetype_is_file = "warn"
+if_then_some_else_none = "warn"
+impl_trait_in_params = "warn"
+integer_division = "warn"
+map_err_ignore = "warn"
+map_with_unused_argument_over_ranges = "warn"
+missing_assert_message = "warn"
+mixed_read_write_in_expression = "warn"
+mod_module_files = "warn"
+module_inception = "warn"
+multiple_inherent_impl = "warn"
+mutex_atomic = "warn"
+mutex_integer = "warn"
+needless_raw_strings = "warn"
+partial_pub_fields = "warn"
+pathbuf_init_then_push = "warn"
+pub_without_shorthand = "warn"
+rc_buffer = "warn"
+rc_mutex = "warn"
+redundant_test_prefix = "warn"
+redundant_type_annotations = "warn"
+ref_patterns = "warn"
+renamed_function_params = "warn"
+rest_pat_in_fully_bound_structs = "warn"
+return_and_then = "warn"
+same_name_method = "warn"
+semicolon_inside_block = "warn"
+str_to_string = "warn"
+string_add = "warn"
+string_lit_chars_any = "warn"
+tests_outside_test_module = "warn"
+try_err = "warn"
+undocumented_unsafe_blocks = "warn"
+unnecessary_safety_comment = "warn"
+unnecessary_safety_doc = "warn"
+unnecessary_self_imports = "warn"
+unneeded_field_pattern = "warn"
+unused_result_ok = "warn"
+use_debug = "warn"
+verbose_file_reads = "warn"
+
+cast_possible_truncation = "allow"
+cast_possible_wrap = "allow"
+cast_sign_loss = "allow"
+struct_excessive_bools = "allow"
+
+
+# These lints will be gradually tightened in the future
+# allow_attributes_without_reason = "warn"
+missing_docs_in_private_items = "allow"
