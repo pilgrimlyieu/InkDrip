@@ -13,6 +13,7 @@ edition = "2024"
 license = "MIT"
 repository = "https://github.com/pilgrimlyieu/InkDrip"
 description = "Turn books into RSS feeds — drip-feed your reading"
+authors = ["PilgrimLyieu (Fesmoph) <pilgrimlyieu@outlook.com>"]
 
 [workspace.dependencies]
 # Shared dependencies across workspace crates

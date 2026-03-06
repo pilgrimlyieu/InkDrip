@@ -28,7 +28,7 @@ docker run -d \
   -p 8080:8080 \
   -v inkdrip-data:/data \
   -e INKDRIP__SERVER__BASE_URL=http://your-server:8080 \
-  inkdrip:latest
+  pilgrimlyieu/inkdrip:latest
 
 # Upload a book
 curl -F "file=@my-book.epub" http://localhost:8080/api/books

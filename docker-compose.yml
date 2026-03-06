@@ -1,4 +1,4 @@
-# InkDrip + RSSHub + FreshRSS
+# InkDrip + RSSHub + FreshRSS (example)
 #
 # Usage:
 #   1. Copy config.example.toml to data/config.toml and adjust settings
@@ -52,7 +52,7 @@ services:
     restart: always
 
   inkdrip:
-    image: inkdrip:latest
+    image: pilgrimlyieu/inkdrip:latest
     build: .
     container_name: inkdrip
     ports:
