@@ -11,6 +11,8 @@ port = 8080
 base_url = "http://localhost:8080"
 # API token for management endpoints. Leave empty to disable auth.
 api_token = ""
+# Maximum upload size in bytes (default: 52428800 = 50 MiB).
+max_upload_bytes = 52428800
 
 [storage]
 # Directory for database, uploaded books, and extracted images.

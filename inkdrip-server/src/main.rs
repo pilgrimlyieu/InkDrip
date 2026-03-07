@@ -11,6 +11,7 @@ use std::time::Duration;
 
 use anyhow::Context as _;
 use axum::Router;
+use axum::extract::DefaultBodyLimit;
 use axum::routing::{delete, get, patch, post};
 use chrono::{NaiveTime, TimeZone, Utc};
 use figment::Figment;
@@ -139,7 +140,11 @@ async fn main() -> anyhow::Result<()> {
 fn build_router(state: AppState) -> Router {
     Router::new()
         // Book API
-        .route("/api/books", post(routes::books::upload_book))
+        .route(
+            "/api/books",
+            post(routes::books::upload_book)
+                .route_layer(DefaultBodyLimit::max(state.config.server.max_upload_bytes)),
+        )
         .route("/api/books", get(routes::books::list_books))
         .route("/api/books/{id}", get(routes::books::get_book))
         .route("/api/books/{id}", patch(routes::books::update_book))

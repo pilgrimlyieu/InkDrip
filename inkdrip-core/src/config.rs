@@ -34,6 +34,8 @@ pub struct ServerConfig {
     pub port: u16,
     pub base_url: String,
     pub api_token: String,
+    /// Maximum allowed upload size in bytes. Defaults to 50 MiB.
+    pub max_upload_bytes: usize,
 }
 
 impl Default for ServerConfig {
@@ -43,6 +45,7 @@ impl Default for ServerConfig {
             port: 8080,
             base_url: "http://localhost:8080".into(),
             api_token: String::new(),
+            max_upload_bytes: 50 * 1024 * 1024, // 50 MiB
         }
     }
 }
