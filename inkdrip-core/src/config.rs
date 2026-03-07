@@ -118,6 +118,17 @@ impl DefaultsConfig {
     }
 }
 
+/// Parse an `"HH:MM"` delivery time string into a [`chrono::NaiveTime`].
+///
+/// Falls back to `08:00` if the string is not in `HH:MM` format.
+#[must_use]
+pub fn parse_delivery_time(s: &str) -> NaiveTime {
+    NaiveTime::parse_from_str(s, "%H:%M").unwrap_or_else(|_| {
+        NaiveTime::from_hms_opt(8, 0, 0)
+            .unwrap_or_else(|| unreachable!("08:00:00 is always a valid NaiveTime"))
+    })
+}
+
 /// Parse a timezone string into a `FixedOffset`.
 ///
 /// Supports `"UTC"`, `"GMT"`, `"UTC+N"`, `"UTC-N"`, and common IANA names.

@@ -7,7 +7,7 @@ use axum::http::{HeaderMap, header};
 use axum::response::IntoResponse;
 use chrono::{Duration, TimeZone, Utc};
 
-use inkdrip_core::config::parse_timezone_offset;
+use inkdrip_core::config::{parse_delivery_time, parse_timezone_offset};
 use inkdrip_core::error::InkDripError;
 use inkdrip_core::feed;
 use inkdrip_core::model::ScheduleConfig;
@@ -41,11 +41,7 @@ pub fn check_auth(state: &AppState, headers: &HeaderMap) -> ApiResult<()> {
 /// If today's `delivery_time` hasn't passed yet, use it; otherwise use tomorrow's.
 pub fn compute_next_delivery(config: &ScheduleConfig) -> chrono::DateTime<chrono::FixedOffset> {
     let tz = parse_timezone_offset(&config.timezone);
-    let delivery_time = chrono::NaiveTime::parse_from_str(&config.delivery_time, "%H:%M")
-        .unwrap_or_else(|_| {
-            chrono::NaiveTime::from_hms_opt(8, 0, 0)
-                .unwrap_or_else(|| unreachable!("08:00:00 is always valid"))
-        });
+    let delivery_time = parse_delivery_time(&config.delivery_time);
 
     let now = Utc::now().with_timezone(&tz);
     let today_at = tz

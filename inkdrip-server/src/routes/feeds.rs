@@ -8,7 +8,7 @@ use chrono::{Duration, TimeZone, Utc};
 use serde::Deserialize;
 use tokio::fs;
 
-use inkdrip_core::config::parse_timezone_offset;
+use inkdrip_core::config::{parse_delivery_time, parse_timezone_offset};
 use inkdrip_core::error::InkDripError;
 use inkdrip_core::feed::{self, FeedFormat};
 use inkdrip_core::model::{Feed, FeedStatus, ScheduleConfig, Segment, SegmentRelease, SkipDays};
@@ -62,13 +62,9 @@ pub async fn create_feed(
             .delivery_time
             .as_deref()
             .unwrap_or(&defaults.delivery_time);
-        let time = chrono::NaiveTime::parse_from_str(delivery, "%H:%M").unwrap_or_else(|_| {
-            match chrono::NaiveTime::from_hms_opt(8, 0, 0) {
-                Some(t) => t,
-                None => unreachable!("08:00:00 is always a valid NaiveTime"),
-            }
-        });
-        let tomorrow = (Utc::now() + Duration::days(1)).date_naive();
+        let time = parse_delivery_time(delivery);
+        let now_local = Utc::now().with_timezone(&tz);
+        let tomorrow = now_local.date_naive() + Duration::days(1);
         tz.from_local_datetime(&tomorrow.and_time(time))
             .single()
             .unwrap_or_else(|| Utc::now().into())
@@ -406,7 +402,29 @@ pub async fn advance_feed(
     let now = Utc::now().with_timezone(&tz);
     let advanced = state.store.advance_releases(&id, count, now).await?;
 
-    let total_released = state.store.count_released_segments(&id, now).await?;
+    // Reschedule all remaining future segments so that tomorrow's delivery
+    // slot is filled — advancing today should not create a gap.
+    let released_count = state.store.count_released_segments(&id, now).await?;
+    state
+        .store
+        .delete_future_releases_for_feed(&id, now)
+        .await?;
+
+    let all_segments = state.store.get_segments(&feed.book_id).await?;
+    let unreleased: Vec<Segment> = all_segments
+        .into_iter()
+        .filter(|s| s.index >= released_count)
+        .collect();
+
+    if !unreleased.is_empty() {
+        let mut next_config = feed.schedule_config.clone();
+        next_config.start_at = compute_next_delivery(&feed.schedule_config);
+        let mut releases = scheduler::compute_release_schedule(&unreleased, &next_config);
+        for r in &mut releases {
+            r.feed_id.clone_from(&id);
+        }
+        state.store.save_releases(&releases).await?;
+    }
 
     let book = state.store.get_book(&feed.book_id).await?;
     let total_segments = book.map_or(0, |b| b.total_segments);
@@ -414,7 +432,7 @@ pub async fn advance_feed(
     Ok(Json(serde_json::json!({
         "feed_id": id,
         "advanced": advanced,
-        "total_released": total_released,
+        "total_released": released_count,
         "total_segments": total_segments,
     })))
 }

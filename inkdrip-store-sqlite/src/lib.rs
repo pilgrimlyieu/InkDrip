@@ -435,7 +435,7 @@ impl BookStore for SqliteStore {
                 stmt.execute(rusqlite::params![
                     r.segment_id,
                     r.feed_id,
-                    r.release_at.to_rfc3339(),
+                    r.release_at.to_utc().to_rfc3339(),
                 ])
                 .map_err(|e| InkDripError::StorageError(format!("Failed to save release: {e}")))?;
             }
@@ -489,7 +489,7 @@ impl BookStore for SqliteStore {
         let conn = self.conn.lock().await;
         conn.execute(
             "DELETE FROM segment_releases WHERE feed_id = ?1 AND release_at > ?2",
-            rusqlite::params![feed_id, after.to_rfc3339()],
+            rusqlite::params![feed_id, after.to_utc().to_rfc3339()],
         )
         .map_err(|e| InkDripError::StorageError(e.to_string()))?;
         Ok(())
@@ -516,7 +516,7 @@ impl BookStore for SqliteStore {
 
         let results = stmt
             .query_map(
-                rusqlite::params![feed_id, after.to_rfc3339(), limit],
+                rusqlite::params![feed_id, after.to_utc().to_rfc3339(), limit],
                 |row| {
                     let segment = Segment {
                         id: row.get(0)?,
@@ -557,7 +557,7 @@ impl BookStore for SqliteStore {
                  JOIN segment_releases sr ON sr.segment_id = s.id
                  JOIN feeds f ON sr.feed_id = f.id
                  WHERE f.book_id = ?1 AND sr.release_at <= ?2",
-                rusqlite::params![book_id, before.to_rfc3339()],
+                rusqlite::params![book_id, before.to_utc().to_rfc3339()],
                 |row| row.get(0),
             )
             .optional()
@@ -608,7 +608,7 @@ impl BookStore for SqliteStore {
 
         let results = stmt
             .query_map(
-                rusqlite::params![feed_id, before.to_rfc3339(), limit],
+                rusqlite::params![feed_id, before.to_utc().to_rfc3339(), limit],
                 |row| {
                     let segment = Segment {
                         id: row.get(0)?,
@@ -645,7 +645,7 @@ impl BookStore for SqliteStore {
         let count: u32 = conn
             .query_row(
                 "SELECT COUNT(*) FROM segment_releases WHERE feed_id = ?1 AND release_at <= ?2",
-                rusqlite::params![feed_id, before.to_rfc3339()],
+                rusqlite::params![feed_id, before.to_utc().to_rfc3339()],
                 |row| row.get(0),
             )
             .map_err(|e| InkDripError::StorageError(e.to_string()))?;
@@ -659,7 +659,7 @@ impl BookStore for SqliteStore {
         release_at: DateTime<FixedOffset>,
     ) -> Result<u32> {
         let conn = self.conn.lock().await;
-        let now_str = release_at.to_rfc3339();
+        let now_str = release_at.to_utc().to_rfc3339();
         let changed = conn
             .execute(
                 "UPDATE segment_releases
@@ -860,7 +860,7 @@ impl BookStore for SqliteStore {
         limit: u32,
     ) -> Result<Vec<(Segment, SegmentRelease, Book)>> {
         let conn = self.conn.lock().await;
-        let before_str = before.to_rfc3339();
+        let before_str = before.to_utc().to_rfc3339();
 
         let sql = if include_all {
             "SELECT s.id, s.book_id, s.idx, s.title_context, s.content_html, s.word_count, s.cumulative_words,

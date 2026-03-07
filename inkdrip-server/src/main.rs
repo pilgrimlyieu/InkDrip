@@ -13,7 +13,7 @@ use anyhow::Context as _;
 use axum::Router;
 use axum::extract::DefaultBodyLimit;
 use axum::routing::{delete, get, patch, post};
-use chrono::{NaiveTime, TimeZone, Utc};
+use chrono::{TimeZone, Utc};
 use figment::Figment;
 use figment::providers::{Env, Format, Serialized, Toml};
 use tokio::net::TcpListener;
@@ -21,7 +21,7 @@ use tokio::time::sleep;
 use tower_http::cors::CorsLayer;
 use tower_http::trace::TraceLayer;
 
-use inkdrip_core::config::{AppConfig, DefaultsConfig, parse_timezone_offset};
+use inkdrip_core::config::{AppConfig, DefaultsConfig, parse_delivery_time, parse_timezone_offset};
 use inkdrip_core::model::AggregateFeed;
 use inkdrip_core::model::{Book, BookFormat, Feed, ScheduleConfig, Segment};
 use inkdrip_core::parser;
@@ -333,12 +333,9 @@ async fn import_book(
 /// Compute the delivery start datetime from defaults config.
 fn compute_delivery_start(defaults: &DefaultsConfig) -> chrono::DateTime<chrono::FixedOffset> {
     let tz = parse_timezone_offset(&defaults.timezone);
-    let delivery_time =
-        NaiveTime::parse_from_str(&defaults.delivery_time, "%H:%M").unwrap_or_else(|_| {
-            NaiveTime::from_hms_opt(8, 0, 0)
-                .unwrap_or_else(|| unreachable!("08:00:00 is always a valid NaiveTime"))
-        });
-    let tomorrow = (Utc::now() + chrono::Duration::days(1)).date_naive();
+    let delivery_time = parse_delivery_time(&defaults.delivery_time);
+    let now_local = Utc::now().with_timezone(&tz);
+    let tomorrow = now_local.date_naive() + chrono::Duration::days(1);
     tz.from_local_datetime(&tomorrow.and_time(delivery_time))
         .single()
         .unwrap_or_else(|| Utc::now().into())

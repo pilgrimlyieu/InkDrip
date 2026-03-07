@@ -1,6 +1,6 @@
-use chrono::{Datelike, NaiveTime, TimeZone};
+use chrono::{Datelike, TimeZone};
 
-use crate::config::parse_timezone_offset;
+use crate::config::{parse_delivery_time, parse_timezone_offset};
 use crate::model::{ScheduleConfig, Segment, SegmentRelease, SkipDays};
 
 /// Compute release timestamps for all segments in a feed.
@@ -15,13 +15,7 @@ pub fn compute_release_schedule(
     config: &ScheduleConfig,
 ) -> Vec<SegmentRelease> {
     let tz = parse_timezone_offset(&config.timezone);
-    let delivery_time =
-        NaiveTime::parse_from_str(&config.delivery_time, "%H:%M").unwrap_or_else(|_| {
-            match NaiveTime::from_hms_opt(8, 0, 0) {
-                Some(t) => t,
-                None => unreachable!("08:00:00 is always a valid NaiveTime"),
-            }
-        });
+    let delivery_time = parse_delivery_time(&config.delivery_time);
 
     let mut releases = Vec::with_capacity(segments.len());
     let mut current_date = config.start_at.with_timezone(&tz).date_naive();
