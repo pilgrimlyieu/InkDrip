@@ -402,7 +402,8 @@ pub async fn advance_feed(
         .ok_or(ApiError(InkDripError::FeedNotFound(id.clone())))?;
 
     let count = body.count.unwrap_or(DEFAULT_ADVANCE_COUNT);
-    let now: chrono::DateTime<chrono::FixedOffset> = Utc::now().into();
+    let tz = parse_timezone_offset(&feed.schedule_config.timezone);
+    let now = Utc::now().with_timezone(&tz);
     let advanced = state.store.advance_releases(&id, count, now).await?;
 
     let total_released = state.store.count_released_segments(&id, now).await?;

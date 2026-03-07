@@ -16,8 +16,6 @@ Thumbs.db
 /data/
 /data-test/
 
-/tests/e2e*
-
 # Environment
 .env
 
