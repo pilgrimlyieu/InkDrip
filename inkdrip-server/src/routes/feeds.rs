@@ -298,7 +298,7 @@ pub async fn list_releases(
     check_auth(&state, &headers)?;
     let id = state.store.resolve_feed_id(&id).await?;
 
-    state
+    let feed = state
         .store
         .get_feed(&id)
         .await?
@@ -306,13 +306,14 @@ pub async fn list_releases(
 
     let releases = state.store.get_releases_for_feed(&id).await?;
     let now: chrono::DateTime<chrono::FixedOffset> = Utc::now().into();
+    let feed_tz = parse_timezone_offset(&feed.schedule_config.timezone);
 
     let items: Vec<serde_json::Value> = releases
         .iter()
         .map(|r| {
             serde_json::json!({
                 "segment_id": r.segment_id,
-                "release_at": r.release_at.to_rfc3339(),
+                "release_at": r.release_at.with_timezone(&feed_tz).to_rfc3339(),
                 "released": r.release_at <= now,
             })
         })
@@ -339,7 +340,7 @@ pub async fn preview_feed(
     check_auth(&state, &headers)?;
     let id = state.store.resolve_feed_id(&id).await?;
 
-    state
+    let feed = state
         .store
         .get_feed(&id)
         .await?
@@ -347,6 +348,7 @@ pub async fn preview_feed(
 
     let now: chrono::DateTime<chrono::FixedOffset> = Utc::now().into();
     let limit = query.limit.unwrap_or(DEFAULT_PREVIEW_LIMIT);
+    let feed_tz = parse_timezone_offset(&feed.schedule_config.timezone);
 
     let upcoming = state
         .store
@@ -361,7 +363,7 @@ pub async fn preview_feed(
                 "index": seg.index,
                 "title_context": seg.title_context,
                 "word_count": seg.word_count,
-                "release_at": rel.release_at.to_rfc3339(),
+                "release_at": rel.release_at.with_timezone(&feed_tz).to_rfc3339(),
                 "content_preview": truncate_html(&seg.content_html, 200),
             })
         })
