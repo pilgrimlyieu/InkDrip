@@ -1043,7 +1043,7 @@ dependencies = [
 
 [[package]]
 name = "inkdrip-cli"
-version = "0.1.0"
+version = "0.1.2"
 dependencies = [
  "anyhow",
  "chrono",
@@ -1058,7 +1058,7 @@ dependencies = [
 
 [[package]]
 name = "inkdrip-core"
-version = "0.1.0"
+version = "0.1.2"
 dependencies = [
  "ammonia",
  "anyhow",
@@ -1079,7 +1079,7 @@ dependencies = [
 
 [[package]]
 name = "inkdrip-server"
-version = "0.1.0"
+version = "0.1.2"
 dependencies = [
  "anyhow",
  "axum",
@@ -1099,7 +1099,7 @@ dependencies = [
 
 [[package]]
 name = "inkdrip-store-sqlite"
-version = "0.1.0"
+version = "0.1.2"
 dependencies = [
  "anyhow",
  "async-trait",

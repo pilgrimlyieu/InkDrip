@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::io::Cursor;
 
 use epub::doc::EpubDoc;
@@ -33,14 +34,37 @@ impl BookParser for EpubParser {
             .mdata("creator")
             .map_or_else(|| "Unknown".to_owned(), |m| m.value.clone());
 
+        // Build a path → title map from the EPUB's table of contents.
+        // NavPoint.content may include a fragment (e.g. "Section002.xhtml#toc_1");
+        // we strip the fragment to get the bare filename for matching.
+        let toc_map: HashMap<String, String> = {
+            let mut map = HashMap::new();
+            let mut stack: Vec<_> = doc.toc.iter().collect();
+            while let Some(nav) = stack.pop() {
+                let path = nav
+                    .content
+                    .to_string_lossy()
+                    .split('#')
+                    .next()
+                    .unwrap_or("")
+                    .to_owned();
+                // Only insert first hit; earlier play_order entries take priority
+                map.entry(path).or_insert_with(|| nav.label.clone());
+                stack.extend(nav.children.iter());
+            }
+            map
+        };
+
         // Collect spine item IDs (reading order)
         let spine_ids: Vec<String> = doc.spine.iter().map(|s| s.idref.clone()).collect();
 
         let mut chapters = Vec::with_capacity(spine_ids.len());
         let mut images = Vec::new();
+        // Chapter counter used only in the fallback title; counts accepted chapters.
+        let mut chapter_num: u32 = 0;
 
         // Iterate through spine items
-        for (idx, spine_id) in spine_ids.iter().enumerate() {
+        for spine_id in &spine_ids {
             // Get the resource path for this spine ID, then read content
             let resource_path = match doc.resources.get(spine_id) {
                 Some(res) => res.path.clone(),
@@ -62,12 +86,22 @@ impl BookParser for EpubParser {
                 continue;
             }
 
-            // Try to extract a chapter title from the content
-            let chapter_title = extract_title_from_html(&clean_html)
-                .unwrap_or_else(|| format!("Chapter {}", idx + 1));
+            chapter_num += 1;
 
+            // Resolve chapter title: TOC map → HTML heading → sequential fallback
+            let filename = resource_path
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_default();
+            let chapter_title = toc_map
+                .get(&filename)
+                .cloned()
+                .or_else(|| extract_title_from_html(&clean_html))
+                .unwrap_or_else(|| format!("Chapter {chapter_num}"));
+
+            let index = chapters.len() as u32;
             chapters.push(Chapter {
-                index: idx as u32,
+                index,
                 title: chapter_title,
                 content_html: clean_html,
                 word_count,
