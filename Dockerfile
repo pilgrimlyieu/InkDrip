@@ -27,6 +27,10 @@ COPY inkdrip-store-sqlite/src inkdrip-store-sqlite/src
 COPY inkdrip-server/src inkdrip-server/src
 COPY inkdrip-cli/src inkdrip-cli/src
 
+# Touch source files to invalidate cache for our code only
+RUN touch inkdrip-core/src/lib.rs inkdrip-store-sqlite/src/lib.rs \
+          inkdrip-server/src/main.rs inkdrip-cli/src/main.rs
+
 # Build release binaries
 RUN cargo build --release --bin inkdrip-server --bin inkdrip-cli
 
