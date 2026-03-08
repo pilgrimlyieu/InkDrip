@@ -23,7 +23,7 @@ InkDrip is a self-hosted service that splits e-books into small segments and del
 - **File watching** — Drop books into a directory for automatic import
 - **Content transforms** — Reading progress indicator, custom CSS, navigation links
 - **Hook system** — Run external commands at key pipeline stages via JSON stdin/stdout
-- **Tiny footprint** — Single binary, SQLite storage, ~20MB Docker image, <50MB RAM
+- **Tiny footprint** — Single binary, SQLite storage, <15MB Docker image, <10MB RAM
 
 ## Quick Start
 
