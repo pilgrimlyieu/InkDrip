@@ -11,6 +11,10 @@ port = 8080
 base_url = "http://localhost:8080"
 # API token for management endpoints. Leave empty to disable auth.
 api_token = ""
+# Whether feed/OPML/aggregate endpoints are publicly accessible.
+# When false and api_token is set, these endpoints require authentication.
+# Images and health checks are always public.
+public_feeds = true
 # Maximum upload size in bytes (default: 52428800 = 50 MiB).
 max_upload_bytes = 52428800
 
@@ -60,9 +64,33 @@ scan_interval_secs = 300
 reading_progress = true
 # Custom CSS to inject into segment HTML content.
 custom_css = ""
-# External command for custom content transformation (advanced).
-# The command receives segment HTML via stdin and should output transformed HTML to stdout.
-# external_command = "python my_transform.py"
+
+# External command hook system for advanced extensibility.
+# Hooks run external commands at key pipeline stages, communicating via
+# JSON on stdin/stdout. Disabled by default.
+[hooks]
+enabled = false
+# Global timeout for all hook executions (seconds).
+timeout_secs = 30
+
+# Runs after book parsing, before splitting into segments.
+# Input (stdin): {"hook":"post_book_parse","title":"...","author":"...","chapters":[...]}
+# Output (stdout): {"chapters":[...]} or empty to keep original.
+# [hooks.post_book_parse]
+# enabled = true
+# command = "python3 /opt/inkdrip/hooks/post-parse.py"
+
+# Runs during feed serving, after all internal transforms.
+# Input (stdin): {"hook":"segment_transform","segment_index":0,"content_html":"...","..."}
+# Output (stdout): {"content_html":"..."} or empty to keep original.
+# [hooks.segment_transform]
+# enabled = true
+# command = "python3 /opt/inkdrip/hooks/transform-segment.py"
+
+# Runs when a segment is first released (future, not yet wired).
+# [hooks.on_release]
+# enabled = true
+# command = "node /opt/inkdrip/hooks/notify-release.js"
 
 [feed]
 # Default feed format: "atom" or "rss".

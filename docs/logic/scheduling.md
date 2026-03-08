@@ -1,0 +1,78 @@
+<div align="right">
+
+**[简体中文](scheduling.zh-CN.md)** | **[English](scheduling.md)**
+
+</div>
+
+# Scheduling Algorithm
+
+InkDrip's scheduler computes release timestamps for all segments in a feed, distributing them across days based on a daily word budget. The implementation lives in [`inkdrip-core/src/scheduler.rs`](/inkdrip-core/src/scheduler.rs).
+
+## Configuration
+
+| Parameter     | Config Key               | Default           | Description                                              |
+| ------------- | ------------------------ | ----------------- | -------------------------------------------------------- |
+| Words per day | `defaults.words_per_day` | 3000              | Daily word budget                                        |
+| Delivery time | `defaults.delivery_time` | `"08:00"`         | Fixed daily delivery time (HH:MM)                        |
+| Timezone      | `defaults.timezone`      | `"Asia/Shanghai"` | IANA timezone name or `UTC±N`                            |
+| Skip days     | `defaults.skip_days`     | `[]`              | Days of the week to skip (e.g. `["saturday", "sunday"]`) |
+
+These defaults apply when creating a new feed. Per-feed overrides can be set via the API.
+
+## Algorithm
+
+The scheduler uses a **greedy budget allocation** approach:
+1. Initialize `current_date` to the feed's `start_at` date and `daily_remaining` to `words_per_day`.
+2. For each segment (in order):
+   - If the segment's `word_count` exceeds `daily_remaining` **and** some budget has already been consumed, advance to the next valid date and reset the budget.
+   - Assign `release_at = current_date + delivery_time` (in the configured timezone).
+   - Subtract the segment's `word_count` from `daily_remaining`.
+3. When advancing dates, skip any day whose weekday appears in `skip_days`.
+
+### Key Behaviors
+
+- **Multiple segments per day:** A day can hold multiple segments as long as the cumulative word count stays within the budget. This means short segments naturally cluster.
+- **Oversized segments:** A segment larger than `words_per_day` is assigned to a fresh day on its own — it won't be split further at schedule time.
+- **Skip days:** Weekend skipping (or any day combination) is supported. The scheduler advances past all skipped days when looking for the next valid date.
+
+## Release Timing
+
+All segments assigned to the same date share the same `release_at` timestamp — the configured `delivery_time` in the configured `timezone`. RSS readers polling after that time will see the new segments.
+
+## Rescheduling
+
+When a feed's configuration changes (e.g., `words_per_day` or `skip_days` is updated), the scheduler recomputes all future releases. Already-released segments are not moved backward. The implementation:
+1. Collects all segments for the book.
+2. Recomputes the full schedule with the new config.
+3. Updates only the `release_at` for segments not yet released.
+
+## Estimation
+
+The helper `estimate_days(total_words, words_per_day)` provides a rough day count: `ceil(total_words / words_per_day)`. This doesn't account for skip days and is used for UI display only.
+
+## Data Flow
+
+```
+Feed creation request
+        │
+        ▼
+  ScheduleConfig {
+    start_at, words_per_day,
+    delivery_time, timezone,
+    skip_days
+  }
+        │
+        ▼
+  compute_release_schedule(segments, config)
+        │
+        ▼
+  Vec<SegmentRelease> {
+    segment_id, feed_id, release_at
+  }
+        │
+        ▼
+  Stored in database
+        │
+        ▼
+  serve_feed() queries: release_at ≤ now
+```

@@ -1,6 +1,12 @@
+<div align="right">
+
+**[简体中文](README.zh-CN.md)** | **[English](README.md)**
+
+</div>
+
 # InkDrip
 
-**将书籍转换为 RSS 订阅 — 像滴水一样享受阅读。**
+**将书籍转换为 RSS 订阅 — 细水长流地享受阅读。**
 
 InkDrip 是一个自托管服务，可将电子书拆分为小片段，并通过标准 Atom/RSS 订阅源按可配置的计划发布。用任意 RSS 阅读器（FreshRSS、Miniflux、Inoreader 等）订阅，每天读一点——不多也不少。
 
@@ -15,6 +21,7 @@ InkDrip 是一个自托管服务，可将电子书拆分为小片段，并通过
 - **OPML 导出** — 一键将所有订阅源导入阅读器
 - **文件监控** — 将书籍放入指定目录即可自动导入
 - **内容变换** — 阅读进度指示器、自定义 CSS、导航链接
+- **钉子系统** — 通过 JSON stdin/stdout 在关键管道节点运行外部命令
 - **极小占用** — 单一二进制文件，SQLite 存储，~20MB Docker 镜像，<50MB 内存
 
 ## 快速开始
@@ -118,6 +125,7 @@ INKDRIP__WATCH__ENABLED=true
 | ------------------------------- | ----------------------- | --------------------------------------- |
 | `server.base_url`               | `http://localhost:8080` | 用于生成订阅链接的公开 URL              |
 | `server.api_token`              | *(空)*                  | API 认证 Bearer Token；为空则不启用认证 |
+| `server.public_feeds`           | `true`                  | 订阅/OPML/聚合端点是否公开；设为 `false` 则需要 Token 认证 |
 | `defaults.words_per_day`        | `3000`                  | 每日阅读字数预算                        |
 | `defaults.target_segment_words` | `1500`                  | 每段目标字数                            |
 | `defaults.delivery_time`        | `08:00`                 | 每日发布时间（HH:MM）                   |
@@ -188,6 +196,8 @@ INKDRIP__WATCH__ENABLED=true
 | `GET` | `/images/:book_id/:file`     | 书籍图片                 |
 | `GET` | `/opml`                      | 导出所有订阅的 OPML 文件 |
 | `GET` | `/health`                    | 健康检查                 |
+
+> **认证说明：** 当设置了 `api_token` 且 `public_feeds = false` 时，订阅/OPML/聚合端点需要 `Bearer <token>` 认证头。图片（`/images/`）及 `/health` 始终公开。
 
 ### 创建订阅请求体
 

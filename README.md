@@ -1,4 +1,11 @@
+<div align="right">
+
+**[简体中文](README.zh-CN.md)** | **[English](README.md)**
+
+</div>
+
 # InkDrip
+
 
 **Turn books into RSS feeds — drip-feed your reading.**
 
@@ -15,6 +22,7 @@ InkDrip is a self-hosted service that splits e-books into small segments and del
 - **OPML export** — Import all feeds into your reader at once
 - **File watching** — Drop books into a directory for automatic import
 - **Content transforms** — Reading progress indicator, custom CSS, navigation links
+- **Hook system** — Run external commands at key pipeline stages via JSON stdin/stdout
 - **Tiny footprint** — Single binary, SQLite storage, ~20MB Docker image, <50MB RAM
 
 ## Quick Start
@@ -120,6 +128,7 @@ INKDRIP__WATCH__ENABLED=true
 | ------------------------------- | ----------------------- | ------------------------------------------ |
 | `server.base_url`               | `http://localhost:8080` | Public URL for feed links and images       |
 | `server.api_token`              | *(empty)*               | Bearer token for API auth; empty = no auth |
+| `server.public_feeds`           | `true`                  | Allow feed/OPML/aggregate endpoints without auth; set `false` to require token |
 | `defaults.words_per_day`        | `3000`                  | Default daily word budget                  |
 | `defaults.target_segment_words` | `1500`                  | Target words per segment                   |
 | `defaults.delivery_time`        | `08:00`                 | Daily release time (HH:MM)                 |
@@ -190,6 +199,8 @@ Example: `skip_days = ["saturday", "sunday"]` to skip weekends.
 | `GET`  | `/images/:book_id/:file`     | Book images              |
 | `GET`  | `/opml`                      | OPML export of all feeds |
 | `GET`  | `/health`                    | Health check             |
+
+> **Auth note:** When `api_token` is set and `public_feeds = false`, the feed/OPML/aggregate endpoints require a `Bearer <token>` header. Images (`/images/`) and `/health` are always public.
 
 ### Create Feed Request Body
 
