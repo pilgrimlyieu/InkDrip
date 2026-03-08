@@ -22,6 +22,8 @@ pub struct AppConfig {
     #[serde(default)]
     pub transforms: TransformsConfig,
     #[serde(default)]
+    pub hooks: HooksConfig,
+    #[serde(default)]
     pub feed: FeedConfig,
     /// Static aggregate feed declarations, upserted on server start.
     #[serde(default)]
@@ -221,7 +223,6 @@ impl Default for WatchConfig {
 pub struct TransformsConfig {
     pub reading_progress: bool,
     pub custom_css: String,
-    pub external_command: Option<String>,
 }
 
 impl Default for TransformsConfig {
@@ -229,9 +230,50 @@ impl Default for TransformsConfig {
         Self {
             reading_progress: true,
             custom_css: String::new(),
-            external_command: None,
         }
     }
+}
+
+/// Configuration for the external command hook system.
+///
+/// Hooks run external commands at key pipeline stages, communicating
+/// via JSON on stdin/stdout.  Disabled by default.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HooksConfig {
+    /// Master switch — when `false`, all hooks are skipped.
+    pub enabled: bool,
+    /// Global timeout for hook executions (seconds).
+    pub timeout_secs: u64,
+    /// Runs after book parsing, before splitting.
+    #[serde(default)]
+    pub post_book_parse: HookEntryConfig,
+    /// Runs during feed serving, after internal transforms.
+    #[serde(default)]
+    pub segment_transform: HookEntryConfig,
+    /// Runs when a new segment is first released.
+    #[serde(default)]
+    pub on_release: HookEntryConfig,
+}
+
+impl Default for HooksConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            timeout_secs: 30,
+            post_book_parse: HookEntryConfig::default(),
+            segment_transform: HookEntryConfig::default(),
+            on_release: HookEntryConfig::default(),
+        }
+    }
+}
+
+/// A single hook entry: whether it's active and the command to run.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct HookEntryConfig {
+    pub enabled: bool,
+    /// Shell-free command string (split on whitespace). The first token
+    /// is the program; remaining tokens are arguments.
+    pub command: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

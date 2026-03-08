@@ -1,6 +1,7 @@
 pub mod config;
 pub mod error;
 pub mod feed;
+pub mod hooks;
 pub mod model;
 pub mod parser;
 pub mod pipeline;

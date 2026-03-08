@@ -2,9 +2,11 @@ use std::fmt::Write as _;
 use std::sync::LazyLock;
 
 use regex::Regex;
+use serde::{Deserialize, Serialize};
 
-use crate::config::TransformsConfig;
+use crate::config::{HookEntryConfig, HooksConfig, TransformsConfig};
 use crate::error::Result;
+use crate::hooks;
 use crate::model::Segment;
 
 /// Context passed to each transform step.
@@ -158,10 +160,73 @@ impl ContentTransform for ImageUrlTransform {
     }
 }
 
+// ─── Hook-based external command transform ──────────────────────
+
+/// JSON payload sent to the `segment_transform` hook on stdin.
+#[derive(Serialize)]
+struct SegmentTransformInput<'a> {
+    hook: &'static str,
+    segment_index: u32,
+    title_context: &'a str,
+    content_html: &'a str,
+    word_count: u32,
+    cumulative_words: u32,
+    feed_slug: &'a str,
+    base_url: &'a str,
+    book_id: &'a str,
+}
+
+/// Expected JSON output from the `segment_transform` hook.
+#[derive(Deserialize)]
+struct SegmentTransformOutput {
+    /// Replacement HTML.  If absent the original is kept.
+    content_html: Option<String>,
+}
+
+/// Runs an external command for each segment at serve time.
+pub struct ExternalCommandTransform {
+    entry: HookEntryConfig,
+    timeout_secs: u64,
+}
+
+impl ContentTransform for ExternalCommandTransform {
+    fn name(&self) -> &'static str {
+        "external_command"
+    }
+
+    fn transform(&self, segment: &mut Segment, ctx: &TransformContext) -> Result<()> {
+        let input = SegmentTransformInput {
+            hook: "segment_transform",
+            segment_index: segment.index,
+            title_context: &segment.title_context,
+            content_html: &segment.content_html,
+            word_count: segment.word_count,
+            cumulative_words: segment.cumulative_words,
+            feed_slug: &ctx.feed_slug,
+            base_url: &ctx.base_url,
+            book_id: &ctx.book_id,
+        };
+
+        if let Some(output) = hooks::run_hook::<_, SegmentTransformOutput>(
+            "segment_transform",
+            &self.entry,
+            &input,
+            self.timeout_secs,
+        )? && let Some(html) = output.content_html
+        {
+            segment.content_html = html;
+        }
+        Ok(())
+    }
+}
+
 /// Build the transform pipeline from configuration.
 #[must_use]
-pub fn build_pipeline(config: &TransformsConfig) -> Vec<Box<dyn ContentTransform>> {
-    let mut transforms: Vec<Box<dyn ContentTransform>> = Vec::with_capacity(4);
+pub fn build_pipeline(
+    config: &TransformsConfig,
+    hooks: &HooksConfig,
+) -> Vec<Box<dyn ContentTransform>> {
+    let mut transforms: Vec<Box<dyn ContentTransform>> = Vec::with_capacity(5);
 
     // Image URL rewrite must come first (before any content wrapping)
     transforms.push(Box::new(ImageUrlTransform));
@@ -177,6 +242,14 @@ pub fn build_pipeline(config: &TransformsConfig) -> Vec<Box<dyn ContentTransform
 
     if config.reading_progress {
         transforms.push(Box::new(ReadingProgressTransform));
+    }
+
+    // External command hook runs last so it can post-process all internal transforms
+    if hooks.enabled && hooks.segment_transform.enabled {
+        transforms.push(Box::new(ExternalCommandTransform {
+            entry: hooks.segment_transform.clone(),
+            timeout_secs: hooks.timeout_secs,
+        }));
     }
 
     transforms

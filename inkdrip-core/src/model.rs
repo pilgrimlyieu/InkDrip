@@ -162,7 +162,7 @@ impl Book {
 // ─── Chapter (parsing intermediate) ────────────────────────────
 
 /// A chapter extracted during parsing, before splitting into segments.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Chapter {
     pub index: u32,
     pub title: String,

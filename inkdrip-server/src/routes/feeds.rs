@@ -481,7 +481,7 @@ pub async fn serve_feed(
         .await?;
 
     // Apply content transforms
-    let transforms = pipeline::build_pipeline(&state.config.transforms);
+    let transforms = pipeline::build_pipeline(&state.config.transforms, &state.config.hooks);
     let ctx = pipeline::TransformContext {
         total_segments: book.total_segments,
         total_words: book.total_words,

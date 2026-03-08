@@ -9,7 +9,8 @@ use axum::response::IntoResponse;
 use serde::Deserialize;
 
 use inkdrip_core::error::InkDripError;
-use inkdrip_core::model::{Book, BookFormat, ParsedBook, Segment};
+use inkdrip_core::hooks;
+use inkdrip_core::model::{Book, BookFormat, Chapter, ParsedBook, Segment};
 use inkdrip_core::parser;
 use inkdrip_core::scheduler;
 use inkdrip_core::splitter::semantic::SemanticSplitter;
@@ -43,7 +44,10 @@ pub async fn upload_book(
     }
 
     // Parse the book
-    let parsed = parser::parse_book(&data, &fname, &state.config.parser)?;
+    let mut parsed = parser::parse_book(&data, &fname, &state.config.parser)?;
+
+    // Run post_book_parse hook (may modify chapters)
+    run_post_book_parse_hook(&state, &mut parsed);
 
     let title = title_override.unwrap_or_else(|| parsed.title.clone());
     let author = author_override.unwrap_or_else(|| parsed.author.clone());
@@ -514,4 +518,61 @@ fn save_and_split_book(
     book.total_segments = segments.len() as u32;
 
     Ok((book, segments))
+}
+
+// ─── Hook helpers ───────────────────────────────────────────────
+
+/// JSON sent to the `post_book_parse` hook.
+#[derive(serde::Serialize)]
+struct PostBookParseInput<'a> {
+    hook: &'static str,
+    title: &'a str,
+    author: &'a str,
+    chapters: &'a [Chapter],
+}
+
+/// JSON expected back from the `post_book_parse` hook.
+#[derive(serde::Deserialize)]
+struct PostBookParseOutput {
+    chapters: Option<Vec<Chapter>>,
+}
+
+/// Invoke the `post_book_parse` hook if configured.
+///
+/// On success the chapters in `parsed` are replaced with the hook's output.
+/// On failure the original chapters are preserved.
+fn run_post_book_parse_hook(state: &AppState, parsed: &mut ParsedBook) {
+    let hooks_cfg = &state.config.hooks;
+    if !hooks_cfg.enabled {
+        return;
+    }
+
+    let input = PostBookParseInput {
+        hook: "post_book_parse",
+        title: &parsed.title,
+        author: &parsed.author,
+        chapters: &parsed.chapters,
+    };
+
+    match hooks::run_hook::<_, PostBookParseOutput>(
+        "post_book_parse",
+        &hooks_cfg.post_book_parse,
+        &input,
+        hooks_cfg.timeout_secs,
+    ) {
+        Ok(Some(output)) => {
+            if let Some(chapters) = output.chapters {
+                tracing::info!(
+                    "post_book_parse hook replaced {} chapters with {}",
+                    parsed.chapters.len(),
+                    chapters.len()
+                );
+                parsed.chapters = chapters;
+            }
+        }
+        Ok(None) => {}
+        Err(e) => {
+            tracing::warn!("post_book_parse hook error (ignored): {e}");
+        }
+    }
 }
