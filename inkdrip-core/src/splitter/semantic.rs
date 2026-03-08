@@ -124,9 +124,61 @@ fn split_chapter(chapter: &Chapter, config: &SplitConfig) -> Vec<(String, u32)> 
     }
 }
 
+/// Container tags that may wrap inner block elements and should be peeled.
+const CONTAINER_TAGS: &[&str] = &["div", "section", "article", "main"];
+
 /// Split HTML content into individual paragraph blocks.
 /// Handles <p>...</p>, <h1>-<h6>, <blockquote>, etc.
+/// Container tags (`div`, `section`, etc.) that wrap inner block elements
+/// are peeled so their children become top-level paragraphs.
 fn split_html_paragraphs(html: &str) -> Vec<String> {
+    let raw = split_html_paragraphs_raw(html);
+
+    // Post-process: unwrap container elements that wrap inner block elements.
+    // Calls itself recursively so arbitrarily nested containers are fully peeled.
+    let mut result: Vec<String> = Vec::with_capacity(raw.len());
+    for para in raw {
+        if let Some(inner) = peel_container(&para) {
+            let inner_parts = split_html_paragraphs(&inner);
+            if inner_parts.len() > 1 {
+                result.extend(inner_parts);
+                continue;
+            }
+        }
+        result.push(para);
+    }
+
+    result
+}
+
+/// If `html` is a single container tag wrapping inner content, return the inner HTML.
+fn peel_container(html: &str) -> Option<String> {
+    let trimmed = html.trim();
+    let lower = trimmed.to_lowercase();
+
+    for &tag in CONTAINER_TAGS {
+        let open_prefix = format!("<{tag}");
+        if !lower.starts_with(&open_prefix) {
+            continue;
+        }
+        let close_tag = format!("</{tag}>");
+        if !lower.ends_with(&close_tag) {
+            continue;
+        }
+        // Find end of opening tag
+        if let Some(gt_pos) = trimmed.find('>') {
+            let inner_start = gt_pos + 1;
+            let inner_end = trimmed.len() - close_tag.len();
+            if inner_start < inner_end {
+                return Some(trimmed[inner_start..inner_end].to_owned());
+            }
+        }
+    }
+    None
+}
+
+/// Core paragraph splitting logic (without container peeling).
+fn split_html_paragraphs_raw(html: &str) -> Vec<String> {
     let mut paragraphs = Vec::new();
     let mut current = String::new();
     let mut depth = 0i32;
@@ -146,6 +198,9 @@ fn split_html_paragraphs(html: &str) -> Vec<String> {
         "ol",
         "li",
         "div",
+        "section",
+        "article",
+        "main",
         "figure",
         "hr",
         "table",
@@ -228,18 +283,6 @@ fn split_html_paragraphs(html: &str) -> Vec<String> {
         paragraphs.push(trimmed);
     }
 
-    // If we couldn't split at all, fall back to splitting by newlines
-    if paragraphs.len() <= 1 && html.len() > 100 {
-        let lines: Vec<String> = html
-            .split('\n')
-            .map(|l| l.trim().to_owned())
-            .filter(|l| !l.is_empty())
-            .collect();
-        if lines.len() > 1 {
-            return lines;
-        }
-    }
-
     paragraphs
 }
 
@@ -286,21 +329,44 @@ fn split_paragraph_by_sentences(html: &str, config: &SplitConfig) -> Vec<(String
     }
 }
 
+/// Closing punctuation that should stay attached to the preceding sentence.
+/// These marks never start a new sentence on their own.
+const CLOSING_PUNCT: &[char] = &[
+    '」', '』', '）', ')', ']', '】', '〕', '｝', '}', '〉', '》', '›', '»',
+    '\u{201D}', // " (right double quotation mark)
+    '\u{2019}', // ' (right single quotation mark)
+];
+
 /// Split text into sentences using punctuation-based heuristics.
 /// Handles both CJK sentence-ending punctuation and Latin period/question/exclamation marks.
+/// Closing quotation marks and brackets that follow sentence-ending punctuation
+/// are kept attached to the sentence they belong to.
 fn split_sentences(text: &str) -> Vec<String> {
     let mut sentences = Vec::new();
     let mut current = String::new();
 
-    for ch in text.chars() {
+    let chars: Vec<char> = text.chars().collect();
+    let len = chars.len();
+    let mut i = 0;
+
+    while i < len {
+        let Some(&ch) = chars.get(i) else { break };
         current.push(ch);
 
-        // Sentence-ending punctuation
         let is_sentence_end = matches!(ch, '.' | '!' | '?' | '。' | '！' | '？' | '；' | '…');
 
         if is_sentence_end && !current.trim().is_empty() {
+            // Consume any immediately following closing punctuation
+            while chars.get(i + 1).is_some_and(|c| CLOSING_PUNCT.contains(c)) {
+                i += 1;
+                if let Some(&c) = chars.get(i) {
+                    current.push(c);
+                }
+            }
             sentences.push(mem::take(&mut current).trim().to_owned());
         }
+
+        i += 1;
     }
 
     // Remaining text
@@ -400,6 +466,63 @@ mod tests {
     }
 
     #[test]
+    fn split_sentences_closing_punct_stays_attached() {
+        // Closing quote after sentence-ending punct stays with the same sentence
+        let text = "「你好。」他说道。";
+        let sentences = split_sentences(text);
+        assert_eq!(sentences.len(), 2);
+        assert_eq!(sentences[0], "「你好。」");
+        assert_eq!(sentences[1], "他说道。");
+    }
+
+    #[test]
+    fn split_sentences_nested_quotes() {
+        // Inner quote triggers a sentence break; closing marks stay attached.
+        let text = "「『真的吗？』她问。」他回忆道。";
+        let sentences = split_sentences(text);
+        assert_eq!(sentences.len(), 3);
+        assert_eq!(sentences[0], "「『真的吗？』");
+        assert_eq!(sentences[1], "她问。」");
+        assert_eq!(sentences[2], "他回忆道。");
+        // Key invariant: no sentence starts with closing punctuation
+        for s in &sentences {
+            let first = s.chars().next().unwrap();
+            assert!(
+                !CLOSING_PUNCT.contains(&first),
+                "Sentence starts with closing punct: {s}"
+            );
+        }
+    }
+
+    #[test]
+    fn split_sentences_latin_quotes() {
+        // ASCII " is ambiguous (opening/closing), so not in CLOSING_PUNCT.
+        // Splitting happens at each sentence-ending mark.
+        let text = r#""Hello world." She said. "Goodbye!""#;
+        let sentences = split_sentences(text);
+        assert_eq!(sentences.len(), 4); // "Hello world. | " She said. | "Goodbye! | "
+    }
+
+    #[test]
+    fn split_sentences_smart_quotes() {
+        // Unicode directional quotes: \u{201C}...\u{201D} are unambiguous.
+        let text = "\u{201C}Hello world.\u{201D} She said.";
+        let sentences = split_sentences(text);
+        assert_eq!(sentences.len(), 2);
+        assert!(sentences[0].ends_with('\u{201D}'));
+    }
+
+    #[test]
+    fn split_sentences_multiple_closing() {
+        // Multiple closing marks chained together
+        let text = "「这是第一句。」）接下来。";
+        let sentences = split_sentences(text);
+        assert_eq!(sentences.len(), 2);
+        assert_eq!(sentences[0], "「这是第一句。」）");
+        assert_eq!(sentences[1], "接下来。");
+    }
+
+    #[test]
     fn semantic_splitter() {
         let config = SplitConfig {
             target_words: 10,
@@ -422,5 +545,48 @@ mod tests {
             assert!(seg.cumulative_words >= prev);
             prev = seg.cumulative_words;
         }
+    }
+
+    #[test]
+    fn peel_container_div() {
+        let html = "<div><p>Paragraph A.</p><p>Paragraph B.</p><p>Paragraph C.</p></div>";
+        let paras = split_html_paragraphs(html);
+        assert_eq!(paras.len(), 3);
+        assert!(paras[0].contains("Paragraph A"));
+        assert!(paras[1].contains("Paragraph B"));
+        assert!(paras[2].contains("Paragraph C"));
+    }
+
+    #[test]
+    fn peel_container_with_attributes() {
+        let html = r#"<div class="chapter"><p>A</p><p>B</p></div>"#;
+        let paras = split_html_paragraphs(html);
+        assert_eq!(paras.len(), 2);
+    }
+
+    #[test]
+    fn peel_container_section() {
+        let html = "<section><p>One.</p><h2>Title</h2><p>Two.</p></section>";
+        let paras = split_html_paragraphs(html);
+        assert_eq!(paras.len(), 3);
+    }
+
+    #[test]
+    fn no_peel_when_no_inner_blocks() {
+        // div with only inline content should not be peeled into nothing
+        let html = "<div>Just some text content here</div>";
+        let paras = split_html_paragraphs(html);
+        assert_eq!(paras.len(), 1);
+    }
+
+    #[test]
+    fn nested_div_peel() {
+        // Recursive peeling: inner containers are also unwrapped.
+        let html = "<div><p>A</p><div><p>B1</p><p>B2</p></div><p>C</p></div>";
+        let paras = split_html_paragraphs(html);
+        // Outer div peeled → <p>A</p>, <div><p>B1</p><p>B2</p></div>, <p>C</p>
+        // Inner div also peeled → <p>B1</p>, <p>B2</p>
+        // Final: A, B1, B2, C
+        assert_eq!(paras.len(), 4);
     }
 }
