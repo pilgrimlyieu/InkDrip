@@ -16,7 +16,7 @@ use inkdrip_core::pipeline;
 use inkdrip_core::scheduler;
 use inkdrip_core::util;
 
-use super::{check_auth, compute_next_delivery, truncate_html};
+use super::{check_auth, check_public_auth, compute_next_delivery, truncate_html};
 use crate::error::{ApiError, ApiResult};
 use crate::state::AppState;
 
@@ -446,10 +446,13 @@ pub async fn advance_feed(
 /// The `format` path segment selects the output: `"atom"` or `"rss"`.
 /// This is the public endpoint that RSS readers poll.
 /// It returns only segments whose `release_at` <= now.
+/// Protected by `check_public_auth` when `server.public_feeds` is `false`.
 pub async fn serve_feed(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Path((slug, format_name)): Path<(String, String)>,
 ) -> ApiResult<impl IntoResponse> {
+    check_public_auth(&state, &headers)?;
     let format: FeedFormat = format_name
         .strip_suffix(".xml")
         .unwrap_or(&format_name)

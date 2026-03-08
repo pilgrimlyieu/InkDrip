@@ -9,7 +9,7 @@ use inkdrip_core::error::InkDripError;
 use inkdrip_core::feed::{self, FeedFormat};
 use inkdrip_core::model::AggregateFeed;
 
-use super::check_auth;
+use super::{check_auth, check_public_auth};
 use crate::error::{ApiError, ApiResult};
 use crate::state::AppState;
 
@@ -174,8 +174,10 @@ pub async fn remove_source(
 /// `GET /aggregates/:slug/:format` — Serve an aggregate feed.
 pub async fn serve_aggregate(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Path((slug, format_name)): Path<(String, String)>,
 ) -> ApiResult<impl IntoResponse> {
+    check_public_auth(&state, &headers)?;
     let format: FeedFormat = format_name
         .strip_suffix(".xml")
         .unwrap_or(&format_name)

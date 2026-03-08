@@ -36,6 +36,17 @@ pub fn check_auth(state: &AppState, headers: &HeaderMap) -> ApiResult<()> {
     Ok(())
 }
 
+/// Verify auth for public-facing endpoints (feeds, OPML, aggregates).
+///
+/// Only enforces authentication when `server.public_feeds` is `false`.
+/// Images and health checks are always public regardless of this setting.
+pub fn check_public_auth(state: &AppState, headers: &HeaderMap) -> ApiResult<()> {
+    if state.config.server.public_feeds {
+        return Ok(());
+    }
+    check_auth(state, headers)
+}
+
 /// Compute the next delivery datetime from a schedule config.
 ///
 /// If today's `delivery_time` hasn't passed yet, use it; otherwise use tomorrow's.
@@ -87,7 +98,11 @@ pub fn truncate_html(html: &str, max_chars: usize) -> String {
 }
 
 /// GET /opml — Export all feeds as OPML.
-pub async fn export_opml(State(state): State<AppState>) -> ApiResult<impl IntoResponse> {
+pub async fn export_opml(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> ApiResult<impl IntoResponse> {
+    check_public_auth(&state, &headers)?;
     let feeds = state.store.list_feeds().await?;
     let mut feed_books = Vec::new();
     for f in feeds {

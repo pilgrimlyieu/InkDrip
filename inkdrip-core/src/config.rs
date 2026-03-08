@@ -34,6 +34,10 @@ pub struct ServerConfig {
     pub port: u16,
     pub base_url: String,
     pub api_token: String,
+    /// Whether feed/OPML/aggregate endpoints are publicly accessible.
+    /// When `false` and `api_token` is set, these endpoints require authentication.
+    /// Defaults to `true` for backward compatibility.
+    pub public_feeds: bool,
     /// Maximum allowed upload size in bytes. Defaults to 50 MiB.
     pub max_upload_bytes: usize,
 }
@@ -45,6 +49,7 @@ impl Default for ServerConfig {
             port: 8080,
             base_url: "http://localhost:8080".into(),
             api_token: String::new(),
+            public_feeds: true,
             max_upload_bytes: 50 * 1024 * 1024, // 50 MiB
         }
     }
