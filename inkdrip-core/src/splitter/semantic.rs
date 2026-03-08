@@ -60,10 +60,26 @@ impl TextSplitter for SemanticSplitter {
     }
 }
 
+/// Check whether adding `unit_words` to a buffer of `current_words` gets
+/// strictly closer to `target` than flushing now.
+///
+/// Returns `true` when `|current + unit - target| < |current - target|`,
+/// i.e., the combined total is at least as close to the target as the buffer
+/// alone. This allows controlled overshoot when the overshoot is smaller than
+/// the current undershoot.
+fn is_closer_to_target(current_words: u32, unit_words: u32, target: u32) -> bool {
+    unit_words < target.saturating_sub(current_words).saturating_mul(2)
+}
+
 /// Split a single chapter into segment-sized chunks.
 /// Returns Vec of `(content_html, word_count)`.
 fn split_chapter(chapter: &Chapter, config: &SplitConfig) -> Vec<(String, u32)> {
-    // Short chapter: return as-is
+    // Short chapter: return as a single segment.
+    // Note: this means chapters between `target_words` and `max_words` are
+    // emitted as-is rather than split and merged back together. When
+    // `target_words + min_words >= max_words` (the default), this is equivalent
+    // to splitting, but with a large `max_words` gap, this shortcut may produce
+    // segments noticeably above `target_words`.
     if chapter.word_count <= config.max_words {
         return vec![(chapter.content_html.clone(), chapter.word_count)];
     }
@@ -91,8 +107,12 @@ fn split_chapter(chapter: &Chapter, config: &SplitConfig) -> Vec<(String, u32)> 
             continue;
         }
 
-        // Would adding this paragraph exceed target? If so, flush.
-        if current_words > 0 && current_words + para_words > config.target_words {
+        // Would adding this paragraph move strictly further from target? If so, flush.
+        // This "closer-to-target" heuristic allows controlled overshoot when the
+        // overshoot is smaller than the current undershoot, producing segments
+        // that are on average closer to target_words.
+        if current_words > 0 && !is_closer_to_target(current_words, para_words, config.target_words)
+        {
             segments.push((mem::take(&mut current_html), current_words));
             current_words = 0;
         }
@@ -298,8 +318,8 @@ fn split_paragraph_by_sentences(html: &str, config: &SplitConfig) -> Vec<(String
     for sentence in &sentences {
         let s_words = count_words(sentence);
 
-        // If adding this sentence would exceed target, flush current buffer
-        if current_words > 0 && current_words + s_words > config.target_words {
+        // If adding this sentence would move strictly further from target, flush.
+        if current_words > 0 && !is_closer_to_target(current_words, s_words, config.target_words) {
             segments.push((
                 format!("<p>{}</p>", html_escape(&current_text)),
                 current_words,
