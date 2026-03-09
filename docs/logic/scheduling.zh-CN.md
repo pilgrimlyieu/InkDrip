@@ -17,7 +17,7 @@ InkDrip 的调度器为订阅源中的所有片段计算发布时间戳，根据
 | 时区     | `defaults.timezone`      | `"Asia/Shanghai"` | IANA 时区名或 `UTC±N`                       |
 | 跳过天数 | `defaults.skip_days`     | `[]`              | 跳过的星期几（如 `["saturday", "sunday"]`） |
 
-以上为创建新订阅源时的默认值，可通过 API 按订阅源覆盖。
+以上为创建新订阅源时的默认值，可通过 API 按订阅源覆盖。每个订阅源在创建时**快照**这些配置——之后修改 `[defaults]` 不会影响已有订阅源。
 
 ## 算法
 
@@ -34,6 +34,7 @@ InkDrip 的调度器为订阅源中的所有片段计算发布时间戳，根据
 - **单日多片段**：只要累计字数不超过预算，一天可容纳多个片段。短片段会自然聚集在同一天。
 - **超大片段**：超过 `words_per_day` 的单个片段会被分配到独立的一天——调度时不会进一步拆分。
 - **跳过日**：支持跳过周末或任意星期组合。调度器在寻找下一个有效日期时会跳过所有标记的日子。
+- **同日排序（错开）**：分配到同一天的片段按阅读顺序错开发布时间。设有 N 个片段同日发布，第 k 个片段（0-indexed）的 `release_at` = `delivery_time − (N − 1 − k) 秒`。因此最后一个片段正好在 `delivery_time` 发布，前面的片段依次提前一秒。RSS 阅读器按时间降序展示时，阅读顺序即为从上到下。
 
 ## 发布时间
 
@@ -63,7 +64,7 @@ InkDrip 的调度器为订阅源中的所有片段计算发布时间戳，根据
   }
         │
         ▼
-  compute_release_schedule(segments, config)
+  compute_release_schedule(segments, config, feed_id)
         │
         ▼
   Vec<SegmentRelease> {

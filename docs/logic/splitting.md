@@ -26,13 +26,13 @@ If a chapter's word count ≤ `max_words`, the entire chapter becomes one segmen
 
 ### Level 2: Paragraph Boundary
 
-For chapters exceeding `max_words`, the splitter walks through HTML block elements (`<p>`, `<div>`, `<blockquote>`, `<h1>`–`<h6>`, `<ul>`, `<ol>`, `<pre>`, `<table>`, `<section>`, `<article>`, `<main>`). It accumulates paragraphs into a buffer until adding the next paragraph would exceed `target_words`, then flushes the buffer as a segment.
+For chapters exceeding `max_words`, the splitter walks through HTML block elements (`<p>`, `<div>`, `<blockquote>`, `<h1>`–`<h6>`, `<ul>`, `<ol>`, `<pre>`, `<table>`, `<section>`, `<article>`, `<main>`). It accumulates paragraphs into a buffer and flushes when the current total is closer to `target_words` than it would be after adding the next paragraph — i.e., the split point that minimises the distance to the target is chosen. This means a segment may slightly exceed `target_words` when doing so produces a more balanced split.
 
 **Container Peeling:** If a block element like `<div>` contains nested block elements (e.g., `<div><p>A</p><p>B</p></div>`), the outer container is "peeled" and the inner blocks are extracted for individual processing. This is critical for EPUB content where chapters are often wrapped in container divs.
 
 ### Level 3: Sentence Boundary
 
-When a single paragraph exceeds `max_words`, the splitter falls back to sentence-level splitting. Sentences are detected by scanning for terminal punctuation:
+When a single paragraph exceeds `max_words`, the splitter falls back to sentence-level splitting. The same "closer to target" heuristic from Level 2 applies here — the splitter flushes at the sentence boundary that minimises distance to `target_words`. Sentences are detected by scanning for terminal punctuation:
 - **CJK terminals:** `。！？`
 - **Latin terminals:** `.!?` (only when not preceded by abbreviation patterns like `Mr.`, `Dr.`, `e.g.`)
 - **Closing punctuation:** After a terminal mark, any immediately following closing punctuation (`」』）】〕｝〉》›»\u{201D}` etc.) is consumed and attached to the same sentence, preventing orphaned quote marks at segment boundaries.

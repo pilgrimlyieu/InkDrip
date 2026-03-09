@@ -17,7 +17,7 @@ InkDrip's scheduler computes release timestamps for all segments in a feed, dist
 | Timezone      | `defaults.timezone`      | `"Asia/Shanghai"` | IANA timezone name or `UTC±N`                            |
 | Skip days     | `defaults.skip_days`     | `[]`              | Days of the week to skip (e.g. `["saturday", "sunday"]`) |
 
-These defaults apply when creating a new feed. Per-feed overrides can be set via the API.
+These defaults apply when creating a new feed and are **snapshotted** into the feed's `schedule_config`. Changing config.toml does not affect existing feeds — use `PATCH /api/feeds/:id` or `inkdrip edit feed` to update a live feed.
 
 ## Algorithm
 
@@ -32,6 +32,7 @@ The scheduler uses a **greedy budget allocation** approach:
 ### Key Behaviors
 
 - **Multiple segments per day:** A day can hold multiple segments as long as the cumulative word count stays within the budget. This means short segments naturally cluster.
+- **Same-day ordering (stagger):** When multiple segments land on the same day, they receive a small sub-second offset so that RSS readers always display them in reading order. Within a batch of N segments, segment k gets an offset of `(N-1-k)` seconds — the first segment in reading order has the highest timestamp and appears at the top in newest-first readers.
 - **Oversized segments:** A segment larger than `words_per_day` is assigned to a fresh day on its own — it won't be split further at schedule time.
 - **Skip days:** Weekend skipping (or any day combination) is supported. The scheduler advances past all skipped days when looking for the next valid date.
 
@@ -63,7 +64,7 @@ Feed creation request
   }
         │
         ▼
-  compute_release_schedule(segments, config)
+  compute_release_schedule(segments, config, feed_id)
         │
         ▼
   Vec<SegmentRelease> {

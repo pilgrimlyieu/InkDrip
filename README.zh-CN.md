@@ -21,7 +21,8 @@ InkDrip 是一个自托管服务，可将电子书拆分为小片段，并通过
 - **OPML 导出** — 一键将所有订阅源导入阅读器
 - **文件监控** — 将书籍放入指定目录即可自动导入
 - **内容变换** — 阅读进度指示器、自定义 CSS、导航链接
-- **钉子系统** — 通过 JSON stdin/stdout 在关键管道节点运行外部命令
+- **钩子系统** — 通过 JSON stdin/stdout 在关键管线节点运行外部命令
+- **撤销 / 重做** — 回滚或重播对书籍与订阅的近期操作
 - **极小占用** — 单一二进制文件，SQLite 存储，<15MB Docker 镜像，<10MB 内存
 
 ## 快速开始
@@ -100,6 +101,11 @@ inkdrip feed status <FEED_ID>
 # 删除书籍
 inkdrip remove <BOOK_ID>
 
+# 撤销 / 重做
+inkdrip history list            # 查看近期操作历史
+inkdrip history undo            # 撤销上一步操作
+inkdrip history redo            # 重做上一步撤销
+
 # 聚合订阅
 inkdrip aggregate create --title "每日阅读" --feeds <FEED_ID_1>,<FEED_ID_2>
 inkdrip aggregate list
@@ -132,6 +138,7 @@ INKDRIP__WATCH__ENABLED=true
 | `defaults.timezone`             | `Asia/Shanghai`         | 排程使用的时区                          |
 | `defaults.skip_days`            | `[]`                    | 跳过的日期（见下方）                    |
 | `watch.enabled`                 | `false`                 | 是否自动导入目录中的书籍                |
+| `history.stack_depth`           | `50`                    | 最多保留的撤销操作数                  |
 
 ### 跳过日期
 
@@ -184,6 +191,14 @@ INKDRIP__WATCH__ENABLED=true
 | `DELETE` | `/api/aggregates/:id`                  | 删除聚合订阅     |
 | `POST`   | `/api/aggregates/:id/sources/:feed_id` | 添加源订阅       |
 | `DELETE` | `/api/aggregates/:id/sources/:feed_id` | 移除源订阅       |
+
+### 操作历史
+
+| 方法   | 路径                | 说明             |
+| ------ | ------------------- | ---------------- |
+| `GET`  | `/api/history`      | 查看近期操作历史 |
+| `POST` | `/api/history/undo` | 撤销上一步操作   |
+| `POST` | `/api/history/redo` | 重做上一步撤销   |
 
 ### 公开端点
 
@@ -245,6 +260,12 @@ inkdrip-cli/            命令行工具（clap + reqwest）
 | EPUB     | `.epub` | EPUB spine（阅读顺序）     |
 | 纯文本   | `.txt`  | `===` 分隔线或多个连续空行 |
 | Markdown | `.md`   | `#` 和 `##` 标题           |
+
+## 文档
+
+- [分段算法](./docs/logic/splitting.md) - 详细解释了语义分段策略，如何在保持自然阅读边界的前提下将章节拆分为适合 RSS 投递的片段。
+- [变换管线与钩子系统](./docs/logic/pipeline.md) - 介绍了内容变换管线以及如何使用钩子在关键节点运行自定义处理。
+- [调度算法](./docs/logic/scheduling.md) - 解释了如何根据订阅的排程配置计算片段的发布时间戳。
 
 ## 许可证
 

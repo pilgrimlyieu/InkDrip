@@ -23,6 +23,9 @@ max_upload_bytes = 52428800
 data_dir = "./data"
 
 [defaults]
+# Default values used when creating new feeds. These are snapshotted at feed
+# creation time — changing them here will NOT affect existing feeds.
+# To update an existing feed, use PATCH /api/feeds/:id or `inkdrip edit feed`.
 # Default words to release per day for new feeds.
 words_per_day = 3000
 # Target word count per segment during splitting.
@@ -107,3 +110,8 @@ items_limit = 50
 # description = "All my book feeds combined"
 # include_all = false        # true = include all feeds automatically
 # feeds = ["feed-slug-1", "feed-slug-2"]
+
+[history]
+# Maximum number of undo entries to keep. Older entries are pruned, and any
+# associated soft-deleted resources are permanently removed.
+stack_depth = 50

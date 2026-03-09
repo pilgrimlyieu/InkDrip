@@ -4,15 +4,15 @@
 
 </div>
 
-# 转换管道与钩子系统
+# 变换管线与钩子系统
 
-InkDrip 在每次提供订阅源时对片段应用一系列内容转换，并可通过钩子系统委派给外部命令。管道实现位于 [`inkdrip-core/src/pipeline.rs`](/inkdrip-core/src/pipeline.rs)；钩子位于 [`inkdrip-core/src/hooks.rs`](/inkdrip-core/src/hooks.rs)。
+InkDrip 在每次提供订阅源时对片段应用一系列内容变换，并可通过钩子系统委派给外部命令。管线实现位于 [`inkdrip-core/src/pipeline.rs`](/inkdrip-core/src/pipeline.rs)；钩子位于 [`inkdrip-core/src/hooks.rs`](/inkdrip-core/src/hooks.rs)。
 
-## 内置转换
+## 内置变换
 
-转换在每次 `serve_feed` 请求时按固定顺序执行。每个转换接收可变的 `Segment` 和 `TransformContext`（总片段数、总字数、基础 URL、订阅源标识、书籍 ID）。
+变换在每次 `serve_feed` 请求时按固定顺序执行。每个变换接收可变的 `Segment` 和 `TransformContext`（总片段数、总字数、基础 URL、订阅源标识、书籍 ID）。
 
-| 顺序 | 转换                       | 常驻                       | 说明                                                                 |
+| 顺序 | 变换                       | 常驻                       | 说明                                                                 |
 | ---- | -------------------------- | -------------------------- | -------------------------------------------------------------------- |
 | 1    | `ImageUrlTransform`        | 是                         | 将 `<img src="...">` 重写为 `{base_url}/images/{book_id}/{basename}` |
 | 2    | `StyleTransform`           | 设置 `custom_css` 时       | 在内容前注入 `<style>` 标签                                          |
@@ -30,7 +30,7 @@ custom_css = ""
 
 ## 钩子系统
 
-钩子在管道的关键阶段运行外部命令，通过 stdin/stdout 交换 JSON。异常钩子（非零退出码、无效 JSON、超时）不会破坏管道——保留原始数据。
+钩子在管线的关键阶段运行外部命令，通过 stdin/stdout 交换 JSON。异常钩子（非零退出码、无效 JSON、超时）不会破坏管线——保留原始数据。
 
 ### 配置
 
@@ -79,7 +79,7 @@ command = "python3 /opt/inkdrip/hooks/transform.py"
 
 #### `segment_transform`
 
-**时机**：订阅源提供时，所有内置转换完成后，生成 Feed XML 之前。
+**时机**：订阅源提供时，所有内置变换完成后，生成 Feed XML 之前。
 
 **stdin：**
 ```json
@@ -99,7 +99,7 @@ command = "python3 /opt/inkdrip/hooks/transform.py"
 **stdout**（或为空以保留原始内容）：
 ```json
 {
-  "content_html": "<p>转换后的内容...</p>"
+  "content_html": "<p>变换后的内容...</p>"
 }
 ```
 
@@ -131,4 +131,4 @@ flowchart LR
 
 ## 聚合订阅源
 
-聚合订阅源将多个书籍订阅源合并为单一 RSS/Atom 订阅源。收集所有成员订阅源（或 `include_all = true` 时的全部订阅源）的已发布片段，按时间顺序合并。聚合源**不会**重新应用转换——使用各订阅源已转换的片段。
+聚合订阅源将多个书籍订阅源合并为单一 RSS/Atom 订阅源。收集所有成员订阅源（或 `include_all = true` 时的全部订阅源）的已发布片段，按时间顺序合并。聚合源**不会**重新应用变换——使用各订阅源已变换的片段。

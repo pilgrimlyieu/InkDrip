@@ -23,6 +23,7 @@ InkDrip is a self-hosted service that splits e-books into small segments and del
 - **File watching** — Drop books into a directory for automatic import
 - **Content transforms** — Reading progress indicator, custom CSS, navigation links
 - **Hook system** — Run external commands at key pipeline stages via JSON stdin/stdout
+- **Undo / redo** — Revert or replay recent operations on books and feeds
 - **Tiny footprint** — Single binary, SQLite storage, <15MB Docker image, <10MB RAM
 
 ## Quick Start
@@ -102,6 +103,11 @@ inkdrip feed status <FEED_ID>
 # Remove a book
 inkdrip remove <BOOK_ID>
 
+# Undo / redo
+inkdrip history list            # Show recent operations
+inkdrip history undo            # Undo the last operation
+inkdrip history redo            # Redo the last undone operation
+
 # Aggregate feeds
 inkdrip aggregate create --title "Daily Reading" --feeds <FEED_ID_1>,<FEED_ID_2>
 inkdrip aggregate list
@@ -135,6 +141,7 @@ INKDRIP__WATCH__ENABLED=true
 | `defaults.timezone`             | `Asia/Shanghai`         | Timezone for scheduling                    |
 | `defaults.skip_days`            | `[]`                    | Days to skip (see below)                   |
 | `watch.enabled`                 | `false`                 | Auto-import books from a directory         |
+| `history.stack_depth`           | `50`                    | Max undo operations retained               |
 
 ### Skip Days
 
@@ -187,6 +194,14 @@ Example: `skip_days = ["saturday", "sunday"]` to skip weekends.
 | `DELETE` | `/api/aggregates/:id`                  | Delete aggregate      |
 | `POST`   | `/api/aggregates/:id/sources/:feed_id` | Add source feed       |
 | `DELETE` | `/api/aggregates/:id/sources/:feed_id` | Remove source feed    |
+
+### History
+
+| Method | Endpoint            | Description                    |
+| ------ | ------------------- | ------------------------------ |
+| `GET`  | `/api/history`      | List recent operations         |
+| `POST` | `/api/history/undo` | Undo the last operation        |
+| `POST` | `/api/history/redo` | Redo the last undone operation |
 
 ### Public Endpoints
 
@@ -248,6 +263,12 @@ The workspace is split into independent crates for modularity. The storage layer
 | EPUB       | `.epub`   | EPUB spine (reading order)                    |
 | Plain Text | `.txt`    | `===` separator lines or multiple blank lines |
 | Markdown   | `.md`     | `#` and `##` headings                         |
+
+## Documentation
+
+- [Splitting Algorithm](./docs/logic/splitting.md) - Detailed explanation of the semantic splitting strategy used to break chapters into segments while preserving natural reading boundaries.
+- [Transform Pipeline & Hooks](./docs/logic/pipeline.md) - Overview of the content transformation pipeline and how to use hooks for custom processing.
+- [Scheduling Algorithm](./docs/logic/scheduling.md) - Explanation of how release timestamps are computed for segments based on the feed's scheduling configuration.
 
 ## License
 
