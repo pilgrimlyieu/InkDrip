@@ -396,3 +396,62 @@ pub fn print_aggregates_table(aggs: &[Value]) {
 fn bool_val(v: &Value, key: &str) -> bool {
     v.get(key).and_then(Value::as_bool).unwrap_or(false)
 }
+
+// ─── History / Undo / Redo ──────────────────────────────────────
+
+#[derive(Tabled)]
+struct HistoryRow {
+    #[tabled(rename = "ID")]
+    id: String,
+    #[tabled(rename = "Operation")]
+    operation: String,
+    #[tabled(rename = "Summary")]
+    summary: String,
+    #[tabled(rename = "Time")]
+    time: String,
+    #[tabled(rename = "")]
+    marker: String,
+}
+
+pub fn print_history_table(entries: &[Value]) {
+    if entries.is_empty() {
+        println!("No history entries.");
+        return;
+    }
+
+    let rows: Vec<HistoryRow> = entries
+        .iter()
+        .map(|e| {
+            let marker = if bool_val(e, "is_current") {
+                "<-".to_owned()
+            } else {
+                String::new()
+            };
+            HistoryRow {
+                id: u64_val(e, "id").to_string(),
+                operation: str_val(e, "operation"),
+                summary: truncate(&str_val(e, "summary"), 50),
+                time: str_val(e, "created_at"),
+                marker,
+            }
+        })
+        .collect();
+
+    println!("{}", render_table(rows));
+}
+
+pub fn print_undo_result(resp: &Value) {
+    println!(
+        "Undone: {} — {}",
+        str_val(resp, "undone"),
+        str_val(resp, "summary"),
+    );
+}
+
+pub fn print_redo_result(resp: &Value) {
+    println!(
+        "Redone: {} — {}",
+        str_val(resp, "redone"),
+        str_val(resp, "summary"),
+    );
+}

@@ -25,6 +25,8 @@ pub struct AppConfig {
     pub hooks: HooksConfig,
     #[serde(default)]
     pub feed: FeedConfig,
+    #[serde(default)]
+    pub history: HistoryConfig,
     /// Static aggregate feed declarations, upserted on server start.
     #[serde(default)]
     pub aggregates: Vec<AggregateConfig>,
@@ -290,6 +292,20 @@ impl Default for FeedConfig {
             format: "atom".into(),
             items_limit: 50,
         }
+    }
+}
+
+/// History / undo-redo configuration.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HistoryConfig {
+    /// Maximum number of undo entries to keep. Oldest entries are purged
+    /// (and associated soft-deleted records hard-deleted) when exceeded.
+    pub stack_depth: u32,
+}
+
+impl Default for HistoryConfig {
+    fn default() -> Self {
+        Self { stack_depth: 50 }
     }
 }
 

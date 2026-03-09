@@ -320,6 +320,34 @@ impl ApiClient {
         handle_response(resp).await?;
         Ok(())
     }
+
+    // ─── History / Undo / Redo ──────────────────────────────────
+
+    pub async fn list_history(&self, limit: Option<u32>) -> Result<Vec<Value>> {
+        let mut path = "/api/history".to_owned();
+        if let Some(l) = limit {
+            path = format!("{path}?limit={l}");
+        }
+        let resp = self.request(Method::GET, &path).send().await?;
+        let val = handle_response(resp).await?;
+        Ok(val.as_array().cloned().unwrap_or_default())
+    }
+
+    pub async fn undo(&self) -> Result<Value> {
+        let resp = self
+            .request(Method::POST, "/api/history/undo")
+            .send()
+            .await?;
+        handle_response(resp).await
+    }
+
+    pub async fn redo(&self) -> Result<Value> {
+        let resp = self
+            .request(Method::POST, "/api/history/redo")
+            .send()
+            .await?;
+        handle_response(resp).await
+    }
 }
 
 /// Extract a human-readable error message from an API JSON error body.

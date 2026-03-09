@@ -28,6 +28,7 @@ use inkdrip_core::parser;
 use inkdrip_core::scheduler;
 use inkdrip_core::splitter::semantic::SemanticSplitter;
 use inkdrip_core::splitter::{SplitConfig, TextSplitter};
+use inkdrip_core::undo::HistoryPayload;
 use inkdrip_core::util;
 use inkdrip_store_sqlite::SqliteStore;
 
@@ -172,6 +173,10 @@ fn build_router(state: AppState) -> Router {
         .route("/api/aggregates/{id}", delete(routes::aggregates::delete_aggregate))
         .route("/api/aggregates/{id}/feeds/{feed_id}", post(routes::aggregates::add_source))
         .route("/api/aggregates/{id}/feeds/{feed_id}", delete(routes::aggregates::remove_source))
+        // History / undo / redo API
+        .route("/api/history", get(routes::history::list_history))
+        .route("/api/history/undo", post(routes::history::undo))
+        .route("/api/history/redo", post(routes::history::redo))
         // Public feed serving
         .route("/feeds/{slug}/{format}", get(routes::feeds::serve_feed))
         .route("/aggregates/{slug}/{format}", get(routes::aggregates::serve_aggregate))
@@ -324,6 +329,15 @@ async fn import_book(
         .await
         .context("save segments")?;
 
+    routes::history::push_history(
+        state,
+        HistoryPayload::UploadBook {
+            book_id: book.id.clone(),
+        },
+        &format!("Watch import '{}'", book.title),
+    )
+    .await;
+
     if state.config.watch.auto_create_feed {
         create_auto_feed(state, &book_id, &parsed.title, &segments).await;
     }
@@ -381,5 +395,15 @@ async fn try_persist_auto_feed(
         .save_releases(&releases)
         .await
         .context("save releases")?;
+
+    routes::history::push_history(
+        state,
+        HistoryPayload::CreateFeed {
+            feed_id: feed.id.clone(),
+        },
+        &format!("Auto-create feed '{slug}'"),
+    )
+    .await;
+
     Ok(())
 }

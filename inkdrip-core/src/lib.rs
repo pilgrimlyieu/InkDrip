@@ -8,5 +8,6 @@ pub mod pipeline;
 pub mod scheduler;
 pub mod splitter;
 pub mod store;
+pub mod undo;
 pub mod util;
 pub mod word_count;

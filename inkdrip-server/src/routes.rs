@@ -1,6 +1,7 @@
 pub mod aggregates;
 pub mod books;
 pub mod feeds;
+pub mod history;
 
 use axum::extract::State;
 use axum::http::{HeaderMap, header};

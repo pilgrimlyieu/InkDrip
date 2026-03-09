@@ -3,7 +3,7 @@ use rusqlite::Connection;
 use inkdrip_core::error::{InkDripError, Result};
 
 /// Current schema version.
-const SCHEMA_VERSION: u32 = 1;
+const SCHEMA_VERSION: u32 = 2;
 
 /// Run all pending database migrations.
 pub fn run_migrations(conn: &Connection) -> Result<()> {
@@ -11,6 +11,9 @@ pub fn run_migrations(conn: &Connection) -> Result<()> {
 
     if current_version < 1 {
         migrate_v1(conn)?;
+    }
+    if current_version < 2 {
+        migrate_v2(conn)?;
     }
 
     set_schema_version(conn, SCHEMA_VERSION)?;
@@ -104,6 +107,36 @@ fn migrate_v1(conn: &Connection) -> Result<()> {
         ",
     )
     .map_err(|e| InkDripError::StorageError(format!("Migration v1 failed: {e}")))?;
+
+    Ok(())
+}
+
+/// Migration v2: Soft-delete support and undo/redo log.
+fn migrate_v2(conn: &Connection) -> Result<()> {
+    tracing::info!("Running migration v2: soft-delete + undo log");
+
+    conn.execute_batch(
+        "
+        ALTER TABLE books ADD COLUMN deleted_at TEXT;
+        ALTER TABLE feeds ADD COLUMN deleted_at TEXT;
+
+        CREATE TABLE IF NOT EXISTS undo_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            operation TEXT NOT NULL,
+            summary TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            payload TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS undo_cursor (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            current_id INTEGER NOT NULL DEFAULT 0
+        );
+
+        INSERT OR IGNORE INTO undo_cursor VALUES (1, 0);
+        ",
+    )
+    .map_err(|e| InkDripError::StorageError(format!("Migration v2 failed: {e}")))?;
 
     Ok(())
 }

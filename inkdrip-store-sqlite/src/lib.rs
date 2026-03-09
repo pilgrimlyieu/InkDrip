@@ -15,6 +15,7 @@ use inkdrip_core::model::{
     AggregateFeed, Book, BookFormat, Feed, FeedStatus, ScheduleConfig, Segment, SegmentRelease,
 };
 use inkdrip_core::store::BookStore;
+use inkdrip_core::undo::UndoEntry;
 
 /// SQLite-backed implementation of `BookStore`.
 pub struct SqliteStore {
@@ -86,7 +87,7 @@ impl BookStore for SqliteStore {
     async fn get_book(&self, id: &str) -> Result<Option<Book>> {
         let conn = self.conn.lock().await;
         let mut stmt = conn
-            .prepare("SELECT id, title, author, format, file_hash, file_path, total_words, total_segments, created_at FROM books WHERE id = ?1")
+            .prepare("SELECT id, title, author, format, file_hash, file_path, total_words, total_segments, created_at FROM books WHERE id = ?1 AND deleted_at IS NULL")
             .map_err(|e| InkDripError::StorageError(e.to_string()))?;
 
         let result = stmt
@@ -103,7 +104,7 @@ impl BookStore for SqliteStore {
     async fn get_book_by_hash(&self, file_hash: &str) -> Result<Option<Book>> {
         let conn = self.conn.lock().await;
         let mut stmt = conn
-            .prepare("SELECT id, title, author, format, file_hash, file_path, total_words, total_segments, created_at FROM books WHERE file_hash = ?1")
+            .prepare("SELECT id, title, author, format, file_hash, file_path, total_words, total_segments, created_at FROM books WHERE file_hash = ?1 AND deleted_at IS NULL")
             .map_err(|e| InkDripError::StorageError(e.to_string()))?;
 
         let result = stmt
@@ -120,7 +121,7 @@ impl BookStore for SqliteStore {
     async fn list_books(&self) -> Result<Vec<Book>> {
         let conn = self.conn.lock().await;
         let mut stmt = conn
-            .prepare("SELECT id, title, author, format, file_hash, file_path, total_words, total_segments, created_at FROM books ORDER BY created_at DESC")
+            .prepare("SELECT id, title, author, format, file_hash, file_path, total_words, total_segments, created_at FROM books WHERE deleted_at IS NULL ORDER BY created_at DESC")
             .map_err(|e| InkDripError::StorageError(e.to_string()))?;
 
         let books = stmt
@@ -154,7 +155,7 @@ impl BookStore for SqliteStore {
         let conn = self.conn.lock().await;
         let pattern = format!("{prefix}%");
         let mut stmt = conn
-            .prepare("SELECT id FROM books WHERE id LIKE ?1")
+            .prepare("SELECT id FROM books WHERE id LIKE ?1 AND deleted_at IS NULL")
             .map_err(|e| InkDripError::StorageError(e.to_string()))?;
         let ids: Vec<String> = stmt
             .query_map(rusqlite::params![pattern], |row| row.get(0))
@@ -295,7 +296,7 @@ impl BookStore for SqliteStore {
     async fn get_feed(&self, id: &str) -> Result<Option<Feed>> {
         let conn = self.conn.lock().await;
         let mut stmt = conn
-            .prepare("SELECT id, book_id, slug, schedule_config, status, created_at FROM feeds WHERE id = ?1")
+            .prepare("SELECT id, book_id, slug, schedule_config, status, created_at FROM feeds WHERE id = ?1 AND deleted_at IS NULL")
             .map_err(|e| InkDripError::StorageError(e.to_string()))?;
 
         let result = stmt
@@ -312,7 +313,7 @@ impl BookStore for SqliteStore {
     async fn get_feed_by_slug(&self, slug: &str) -> Result<Option<Feed>> {
         let conn = self.conn.lock().await;
         let mut stmt = conn
-            .prepare("SELECT id, book_id, slug, schedule_config, status, created_at FROM feeds WHERE slug = ?1")
+            .prepare("SELECT id, book_id, slug, schedule_config, status, created_at FROM feeds WHERE slug = ?1 AND deleted_at IS NULL")
             .map_err(|e| InkDripError::StorageError(e.to_string()))?;
 
         let result = stmt
@@ -329,7 +330,7 @@ impl BookStore for SqliteStore {
     async fn list_feeds(&self) -> Result<Vec<Feed>> {
         let conn = self.conn.lock().await;
         let mut stmt = conn
-            .prepare("SELECT id, book_id, slug, schedule_config, status, created_at FROM feeds ORDER BY created_at DESC")
+            .prepare("SELECT id, book_id, slug, schedule_config, status, created_at FROM feeds WHERE deleted_at IS NULL ORDER BY created_at DESC")
             .map_err(|e| InkDripError::StorageError(e.to_string()))?;
 
         let feeds = stmt
@@ -344,7 +345,7 @@ impl BookStore for SqliteStore {
     async fn list_feeds_for_book(&self, book_id: &str) -> Result<Vec<Feed>> {
         let conn = self.conn.lock().await;
         let mut stmt = conn
-            .prepare("SELECT id, book_id, slug, schedule_config, status, created_at FROM feeds WHERE book_id = ?1 ORDER BY created_at DESC")
+            .prepare("SELECT id, book_id, slug, schedule_config, status, created_at FROM feeds WHERE book_id = ?1 AND deleted_at IS NULL ORDER BY created_at DESC")
             .map_err(|e| InkDripError::StorageError(e.to_string()))?;
 
         let feeds = stmt
@@ -400,7 +401,7 @@ impl BookStore for SqliteStore {
         let conn = self.conn.lock().await;
         let pattern = format!("{prefix}%");
         let mut stmt = conn
-            .prepare("SELECT id FROM feeds WHERE id LIKE ?1")
+            .prepare("SELECT id FROM feeds WHERE id LIKE ?1 AND deleted_at IS NULL")
             .map_err(|e| InkDripError::StorageError(e.to_string()))?;
         let ids: Vec<String> = stmt
             .query_map(rusqlite::params![pattern], |row| row.get(0))
@@ -870,7 +871,7 @@ impl BookStore for SqliteStore {
              JOIN segments s ON s.id = sr.segment_id
              JOIN feeds f ON f.id = sr.feed_id
              JOIN books b ON b.id = s.book_id
-             WHERE sr.release_at <= ?1 AND f.status = 'active'
+             WHERE sr.release_at <= ?1 AND f.status = 'active' AND f.deleted_at IS NULL AND b.deleted_at IS NULL
              ORDER BY sr.release_at DESC
              LIMIT ?2".to_owned()
         } else {
@@ -881,7 +882,7 @@ impl BookStore for SqliteStore {
              JOIN segments s ON s.id = sr.segment_id
              JOIN aggregate_feed_sources afs ON afs.feed_id = sr.feed_id AND afs.aggregate_id = ?3
              JOIN books b ON b.id = s.book_id
-             WHERE sr.release_at <= ?1
+             WHERE sr.release_at <= ?1 AND b.deleted_at IS NULL
              ORDER BY sr.release_at DESC
              LIMIT ?2".to_owned()
         };
@@ -941,6 +942,237 @@ impl BookStore for SqliteStore {
             results.push(row.map_err(|e| InkDripError::StorageError(e.to_string()))?);
         }
         Ok(results)
+    }
+
+    // ─── Soft-Delete ────────────────────────────────────────────
+
+    async fn soft_delete_book(&self, id: &str) -> Result<()> {
+        let conn = self.conn.lock().await;
+        let now = chrono::Utc::now().to_rfc3339();
+        conn.execute(
+            "UPDATE books SET deleted_at = ?1 WHERE id = ?2 AND deleted_at IS NULL",
+            rusqlite::params![now, id],
+        )
+        .map_err(|e| InkDripError::StorageError(e.to_string()))?;
+        // Cascade to feeds belonging to this book
+        conn.execute(
+            "UPDATE feeds SET deleted_at = ?1 WHERE book_id = ?2 AND deleted_at IS NULL",
+            rusqlite::params![now, id],
+        )
+        .map_err(|e| InkDripError::StorageError(e.to_string()))?;
+        Ok(())
+    }
+
+    async fn restore_book(&self, id: &str) -> Result<()> {
+        let conn = self.conn.lock().await;
+        conn.execute(
+            "UPDATE books SET deleted_at = NULL WHERE id = ?1",
+            rusqlite::params![id],
+        )
+        .map_err(|e| InkDripError::StorageError(e.to_string()))?;
+        // Restore feeds belonging to this book
+        conn.execute(
+            "UPDATE feeds SET deleted_at = NULL WHERE book_id = ?1",
+            rusqlite::params![id],
+        )
+        .map_err(|e| InkDripError::StorageError(e.to_string()))?;
+        Ok(())
+    }
+
+    async fn soft_delete_feed(&self, id: &str) -> Result<()> {
+        let conn = self.conn.lock().await;
+        let now = chrono::Utc::now().to_rfc3339();
+        conn.execute(
+            "UPDATE feeds SET deleted_at = ?1 WHERE id = ?2 AND deleted_at IS NULL",
+            rusqlite::params![now, id],
+        )
+        .map_err(|e| InkDripError::StorageError(e.to_string()))?;
+        Ok(())
+    }
+
+    async fn restore_feed(&self, id: &str) -> Result<()> {
+        let conn = self.conn.lock().await;
+        conn.execute(
+            "UPDATE feeds SET deleted_at = NULL WHERE id = ?1",
+            rusqlite::params![id],
+        )
+        .map_err(|e| InkDripError::StorageError(e.to_string()))?;
+        Ok(())
+    }
+
+    // ─── Undo/Redo Log ─────────────────────────────────────────
+
+    async fn push_undo_entry(
+        &self,
+        operation: &str,
+        summary: &str,
+        payload: &serde_json::Value,
+        max_depth: u32,
+    ) -> Result<i64> {
+        let conn = self.conn.lock().await;
+        let now = chrono::Utc::now().to_rfc3339();
+        let payload_str = serde_json::to_string(payload)
+            .map_err(|e| InkDripError::StorageError(e.to_string()))?;
+
+        let tx = conn
+            .unchecked_transaction()
+            .map_err(|e| InkDripError::StorageError(e.to_string()))?;
+
+        // Get current cursor position
+        let cursor_id: i64 = tx
+            .query_row("SELECT current_id FROM undo_cursor WHERE id = 1", [], |r| {
+                r.get(0)
+            })
+            .map_err(|e| InkDripError::StorageError(e.to_string()))?;
+
+        // Collect entries beyond cursor (redo chain) for cleanup
+        let orphan_payloads = collect_orphan_payloads(&tx, cursor_id)?;
+
+        // Truncate redo chain: delete entries after cursor
+        tx.execute(
+            "DELETE FROM undo_log WHERE id > ?1",
+            rusqlite::params![cursor_id],
+        )
+        .map_err(|e| InkDripError::StorageError(e.to_string()))?;
+
+        // Hard-delete resources orphaned by redo chain truncation
+        for op_payload in &orphan_payloads {
+            hard_delete_orphaned_resource(&tx, op_payload)?;
+        }
+
+        // Insert new entry
+        tx.execute(
+            "INSERT INTO undo_log (operation, summary, created_at, payload) VALUES (?1, ?2, ?3, ?4)",
+            rusqlite::params![operation, summary, now, payload_str],
+        )
+        .map_err(|e| InkDripError::StorageError(e.to_string()))?;
+
+        let new_id = tx.last_insert_rowid();
+
+        // Advance cursor to the new entry
+        tx.execute(
+            "UPDATE undo_cursor SET current_id = ?1 WHERE id = 1",
+            rusqlite::params![new_id],
+        )
+        .map_err(|e| InkDripError::StorageError(e.to_string()))?;
+
+        // Prune oldest entries beyond max_depth
+        let count: i64 = tx
+            .query_row("SELECT COUNT(*) FROM undo_log", [], |r| r.get(0))
+            .map_err(|e| InkDripError::StorageError(e.to_string()))?;
+
+        if count > i64::from(max_depth) {
+            let excess = count - i64::from(max_depth);
+            let pruned_payloads = collect_pruned_payloads(&tx, excess)?;
+
+            tx.execute(
+                "DELETE FROM undo_log WHERE id IN (SELECT id FROM undo_log ORDER BY id ASC LIMIT ?1)",
+                rusqlite::params![excess],
+            )
+            .map_err(|e| InkDripError::StorageError(e.to_string()))?;
+
+            // Hard-delete resources from pruned entries (expired soft-deletes)
+            for op_payload in &pruned_payloads {
+                hard_delete_pruned_resource(&tx, op_payload)?;
+            }
+        }
+
+        tx.commit()
+            .map_err(|e| InkDripError::StorageError(e.to_string()))?;
+        Ok(new_id)
+    }
+
+    async fn get_undo_entry(&self) -> Result<Option<UndoEntry>> {
+        let conn = self.conn.lock().await;
+        let cursor_id: i64 = conn
+            .query_row("SELECT current_id FROM undo_cursor WHERE id = 1", [], |r| {
+                r.get(0)
+            })
+            .map_err(|e| InkDripError::StorageError(e.to_string()))?;
+
+        if cursor_id == 0 {
+            return Ok(None);
+        }
+
+        let entry = conn
+            .query_row(
+                "SELECT id, operation, summary, created_at, payload FROM undo_log WHERE id = ?1",
+                rusqlite::params![cursor_id],
+                row_to_undo_entry,
+            )
+            .optional()
+            .map_err(|e| InkDripError::StorageError(e.to_string()))?;
+        Ok(entry)
+    }
+
+    async fn retreat_undo_cursor(&self) -> Result<()> {
+        let conn = self.conn.lock().await;
+        let cursor_id: i64 = conn
+            .query_row("SELECT current_id FROM undo_cursor WHERE id = 1", [], |r| {
+                r.get(0)
+            })
+            .map_err(|e| InkDripError::StorageError(e.to_string()))?;
+
+        // Find the previous entry (the one before cursor_id)
+        let prev_id: i64 = conn
+            .query_row(
+                "SELECT COALESCE(MAX(id), 0) FROM undo_log WHERE id < ?1",
+                rusqlite::params![cursor_id],
+                |r| r.get(0),
+            )
+            .map_err(|e| InkDripError::StorageError(e.to_string()))?;
+
+        conn.execute(
+            "UPDATE undo_cursor SET current_id = ?1 WHERE id = 1",
+            rusqlite::params![prev_id],
+        )
+        .map_err(|e| InkDripError::StorageError(e.to_string()))?;
+        Ok(())
+    }
+
+    async fn get_redo_entry(&self) -> Result<Option<UndoEntry>> {
+        let conn = self.conn.lock().await;
+        let cursor_id: i64 = conn
+            .query_row("SELECT current_id FROM undo_cursor WHERE id = 1", [], |r| {
+                r.get(0)
+            })
+            .map_err(|e| InkDripError::StorageError(e.to_string()))?;
+
+        let entry = conn
+            .query_row(
+                "SELECT id, operation, summary, created_at, payload FROM undo_log WHERE id > ?1 ORDER BY id ASC LIMIT 1",
+                rusqlite::params![cursor_id],
+                row_to_undo_entry,
+            )
+            .optional()
+            .map_err(|e| InkDripError::StorageError(e.to_string()))?;
+        Ok(entry)
+    }
+
+    async fn advance_undo_cursor(&self, id: i64) -> Result<()> {
+        let conn = self.conn.lock().await;
+        conn.execute(
+            "UPDATE undo_cursor SET current_id = ?1 WHERE id = 1",
+            rusqlite::params![id],
+        )
+        .map_err(|e| InkDripError::StorageError(e.to_string()))?;
+        Ok(())
+    }
+
+    async fn list_undo_history(&self, limit: u32) -> Result<Vec<UndoEntry>> {
+        let conn = self.conn.lock().await;
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, operation, summary, created_at, payload FROM undo_log ORDER BY id DESC LIMIT ?1",
+            )
+            .map_err(|e| InkDripError::StorageError(e.to_string()))?;
+
+        let entries = stmt
+            .query_map(rusqlite::params![limit], row_to_undo_entry)
+            .map_err(|e| InkDripError::StorageError(e.to_string()))?
+            .collect::<StdResult<Vec<_>, _>>()
+            .map_err(|e| InkDripError::StorageError(e.to_string()))?;
+        Ok(entries)
     }
 }
 
@@ -1039,6 +1271,99 @@ fn row_to_aggregate_feed(row: &rusqlite::Row) -> rusqlite::Result<AggregateFeed>
         created_at: DateTime::parse_from_rfc3339(&created_at_str)
             .unwrap_or_else(|_| chrono::Utc::now().into()),
     })
+}
+
+fn row_to_undo_entry(row: &rusqlite::Row) -> rusqlite::Result<UndoEntry> {
+    let created_at_str: String = row.get(3)?;
+    let payload_str: String = row.get(4)?;
+    Ok(UndoEntry {
+        id: row.get(0)?,
+        operation: row.get(1)?,
+        summary: row.get(2)?,
+        created_at: DateTime::parse_from_rfc3339(&created_at_str)
+            .unwrap_or_else(|_| chrono::Utc::now().into()),
+        payload: serde_json::from_str(&payload_str).unwrap_or(serde_json::Value::Null),
+    })
+}
+
+/// Collect payload strings for entries beyond the cursor (redo chain) before deletion.
+fn collect_orphan_payloads(tx: &Connection, cursor_id: i64) -> Result<Vec<String>> {
+    let mut stmt = tx
+        .prepare("SELECT payload FROM undo_log WHERE id > ?1")
+        .map_err(|e| InkDripError::StorageError(e.to_string()))?;
+    let rows = stmt
+        .query_map(rusqlite::params![cursor_id], |row| row.get(0))
+        .map_err(|e| InkDripError::StorageError(e.to_string()))?;
+    let mut payloads = Vec::new();
+    for row in rows {
+        payloads.push(row.map_err(|e| InkDripError::StorageError(e.to_string()))?);
+    }
+    Ok(payloads)
+}
+
+/// Collect payload strings for the oldest `count` entries before pruning.
+fn collect_pruned_payloads(tx: &Connection, count: i64) -> Result<Vec<String>> {
+    let mut stmt = tx
+        .prepare("SELECT payload FROM undo_log ORDER BY id ASC LIMIT ?1")
+        .map_err(|e| InkDripError::StorageError(e.to_string()))?;
+    let rows = stmt
+        .query_map(rusqlite::params![count], |row| row.get(0))
+        .map_err(|e| InkDripError::StorageError(e.to_string()))?;
+    let mut payloads = Vec::new();
+    for row in rows {
+        payloads.push(row.map_err(|e| InkDripError::StorageError(e.to_string()))?);
+    }
+    Ok(payloads)
+}
+
+/// When redo chain is truncated, hard-delete resources that were created and then
+/// undone — their redo path is now unreachable.
+fn hard_delete_orphaned_resource(tx: &Connection, payload_str: &str) -> Result<()> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(payload_str) {
+        match val.get("op").and_then(|v| v.as_str()) {
+            // CreateFeed was undone → feed is soft-deleted, redo is gone → hard-delete
+            Some("CreateFeed") => {
+                if let Some(id) = val.get("feed_id").and_then(|v| v.as_str()) {
+                    tx.execute("DELETE FROM feeds WHERE id = ?1", rusqlite::params![id])
+                        .map_err(|e| InkDripError::StorageError(e.to_string()))?;
+                }
+            }
+            // UploadBook was undone → book is soft-deleted, redo is gone → hard-delete
+            Some("UploadBook") => {
+                if let Some(id) = val.get("book_id").and_then(|v| v.as_str()) {
+                    tx.execute("DELETE FROM books WHERE id = ?1", rusqlite::params![id])
+                        .map_err(|e| InkDripError::StorageError(e.to_string()))?;
+                }
+            }
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
+/// When old entries are pruned, hard-delete resources that were deleted and are now
+/// beyond the undoable window.
+fn hard_delete_pruned_resource(tx: &Connection, payload_str: &str) -> Result<()> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(payload_str) {
+        match val.get("op").and_then(|v| v.as_str()) {
+            // DeleteBook was pruned → soft-deleted book is beyond undo horizon → hard-delete
+            Some("DeleteBook") => {
+                if let Some(id) = val.get("book_id").and_then(|v| v.as_str()) {
+                    tx.execute("DELETE FROM books WHERE id = ?1", rusqlite::params![id])
+                        .map_err(|e| InkDripError::StorageError(e.to_string()))?;
+                }
+            }
+            // DeleteFeed was pruned → soft-deleted feed is beyond undo horizon → hard-delete
+            Some("DeleteFeed") => {
+                if let Some(id) = val.get("feed_id").and_then(|v| v.as_str()) {
+                    tx.execute("DELETE FROM feeds WHERE id = ?1", rusqlite::params![id])
+                        .map_err(|e| InkDripError::StorageError(e.to_string()))?;
+                }
+            }
+            _ => {}
+        }
+    }
+    Ok(())
 }
 
 /// Required by rusqlite for optional query results.

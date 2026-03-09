@@ -15,10 +15,12 @@ use inkdrip_core::parser;
 use inkdrip_core::scheduler;
 use inkdrip_core::splitter::semantic::SemanticSplitter;
 use inkdrip_core::splitter::{SplitConfig, TextSplitter};
+use inkdrip_core::undo::HistoryPayload;
 use inkdrip_core::util;
 
 use super::check_auth;
 use super::compute_next_delivery;
+use super::history::push_history;
 use crate::error::{ApiError, ApiResult};
 use crate::state::AppState;
 
@@ -74,6 +76,15 @@ pub async fn upload_book(
     // Persist
     state.store.save_book(&book).await?;
     state.store.save_segments(&segments).await?;
+
+    push_history(
+        &state,
+        HistoryPayload::UploadBook {
+            book_id: book.id.clone(),
+        },
+        &format!("Upload book '{}'", book.title),
+    )
+    .await;
 
     tracing::info!(
         "Book '{}' imported: {} words, {} segments",
@@ -150,7 +161,17 @@ pub async fn delete_book(
         .join(&book.id);
     let _ = fs::remove_dir_all(&images_dir);
 
-    state.store.delete_book(&id).await?;
+    state.store.soft_delete_book(&id).await?;
+
+    push_history(
+        &state,
+        HistoryPayload::DeleteBook {
+            book_id: id.clone(),
+        },
+        &format!("Delete book '{}'", book.title),
+    )
+    .await;
+
     tracing::info!("Book '{}' deleted", book.title);
 
     Ok(StatusCode::NO_CONTENT)
@@ -180,10 +201,23 @@ pub async fn update_book(
         .await?
         .ok_or(ApiError(InkDripError::BookNotFound(id.clone())))?;
 
-    let title = req.title.unwrap_or(book.title);
-    let author = req.author.unwrap_or(book.author);
+    let title = req.title.unwrap_or(book.title.clone());
+    let author = req.author.unwrap_or(book.author.clone());
 
     state.store.update_book_meta(&id, &title, &author).await?;
+
+    push_history(
+        &state,
+        HistoryPayload::UpdateBook {
+            book_id: id.clone(),
+            old_title: book.title,
+            old_author: book.author,
+            new_title: title,
+            new_author: author,
+        },
+        &format!("Update book '{id}'"),
+    )
+    .await;
 
     let updated = state
         .store
@@ -303,8 +337,7 @@ pub async fn resplit_book(
         if !new_segments.is_empty() {
             let mut config = feed.schedule_config.clone();
             config.start_at = compute_next_delivery(&config);
-            let releases =
-                scheduler::compute_release_schedule(&new_segments, &config, &feed.id);
+            let releases = scheduler::compute_release_schedule(&new_segments, &config, &feed.id);
             state.store.save_releases(&releases).await?;
         }
     }

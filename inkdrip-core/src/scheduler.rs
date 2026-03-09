@@ -81,7 +81,9 @@ fn stagger_same_day_releases(releases: &mut [SegmentRelease]) {
             j += 1;
         }
         let batch_size = j - i;
-        if batch_size > 1 && let Some(batch) = releases.get_mut(i..j) {
+        if batch_size > 1
+            && let Some(batch) = releases.get_mut(i..j)
+        {
             for (k, release) in batch.iter_mut().enumerate() {
                 let offset_secs = (batch_size - 1 - k) as i64;
                 release.release_at += Duration::seconds(offset_secs);

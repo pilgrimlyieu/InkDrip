@@ -97,6 +97,11 @@ enum Commands {
         #[command(subcommand)]
         action: AggregateAction,
     },
+    /// View and manage undo/redo history
+    History {
+        #[command(subcommand)]
+        action: HistoryAction,
+    },
 }
 
 #[derive(Subcommand)]
@@ -239,6 +244,20 @@ enum AggregateAction {
     Delete {
         /// Aggregate feed ID
         id: String,
+    },
+}
+
+#[derive(Subcommand)]
+enum HistoryAction {
+    /// Undo the most recent action
+    Undo,
+    /// Redo the last undone action
+    Redo,
+    /// List recent history entries
+    List {
+        /// Maximum entries to show
+        #[arg(long, default_value = "20")]
+        limit: u32,
     },
 }
 
@@ -420,6 +439,22 @@ async fn main() -> Result<()> {
             AggregateAction::Delete { id } => {
                 client.delete_aggregate(&id).await?;
                 println!("Aggregate feed {id} deleted.");
+            }
+        },
+        Commands::History { action } => match action {
+            HistoryAction::Undo => {
+                let resp = client.undo().await?;
+                print_output(json_mode, &resp, || output::print_undo_result(&resp));
+            }
+            HistoryAction::Redo => {
+                let resp = client.redo().await?;
+                print_output(json_mode, &resp, || output::print_redo_result(&resp));
+            }
+            HistoryAction::List { limit } => {
+                let entries = client.list_history(Some(limit)).await?;
+                print_output(json_mode, &entries, || {
+                    output::print_history_table(&entries);
+                });
             }
         },
     }

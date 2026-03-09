@@ -5,6 +5,7 @@ use crate::error::Result;
 use crate::model::{
     AggregateFeed, Book, Feed, FeedStatus, ScheduleConfig, Segment, SegmentRelease,
 };
+use crate::undo::UndoEntry;
 
 /// Abstract storage backend for `InkDrip`.
 ///
@@ -144,4 +145,42 @@ pub trait BookStore: Send + Sync {
         before: DateTime<FixedOffset>,
         limit: u32,
     ) -> Result<Vec<(Segment, SegmentRelease, Book)>>;
+
+    // ─── Soft-Delete ────────────────────────────────────────────
+
+    /// Mark a book as deleted (sets `deleted_at`), and cascade to its feeds.
+    async fn soft_delete_book(&self, id: &str) -> Result<()>;
+    /// Restore a soft-deleted book (clears `deleted_at`), and cascade to its feeds.
+    async fn restore_book(&self, id: &str) -> Result<()>;
+    /// Mark a feed as deleted (sets `deleted_at`).
+    async fn soft_delete_feed(&self, id: &str) -> Result<()>;
+    /// Restore a soft-deleted feed (clears `deleted_at`).
+    async fn restore_feed(&self, id: &str) -> Result<()>;
+
+    // ─── Undo/Redo Log ─────────────────────────────────────────
+
+    /// Push a new undo entry: truncate redo chain, insert entry, advance cursor,
+    /// prune oldest entries beyond `max_depth`. Returns the new entry ID.
+    async fn push_undo_entry(
+        &self,
+        operation: &str,
+        summary: &str,
+        payload: &serde_json::Value,
+        max_depth: u32,
+    ) -> Result<i64>;
+
+    /// Get the entry at the current undo cursor (the most recent undoable action).
+    async fn get_undo_entry(&self) -> Result<Option<UndoEntry>>;
+
+    /// Move the undo cursor backward (toward older entries).
+    async fn retreat_undo_cursor(&self) -> Result<()>;
+
+    /// Get the next redo entry (the entry immediately after the cursor).
+    async fn get_redo_entry(&self) -> Result<Option<UndoEntry>>;
+
+    /// Move the undo cursor forward to the given entry ID.
+    async fn advance_undo_cursor(&self, id: i64) -> Result<()>;
+
+    /// List recent undo history entries (newest first).
+    async fn list_undo_history(&self, limit: u32) -> Result<Vec<UndoEntry>>;
 }

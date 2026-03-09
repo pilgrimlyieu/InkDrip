@@ -4,7 +4,7 @@ use axum::Json;
 use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::IntoResponse;
-use chrono::{Duration, TimeZone, Utc};
+use chrono::{DateTime, Duration, FixedOffset, TimeZone, Utc};
 use serde::Deserialize;
 use tokio::fs;
 
@@ -14,8 +14,10 @@ use inkdrip_core::feed::{self, FeedFormat};
 use inkdrip_core::model::{Feed, FeedStatus, ScheduleConfig, Segment, SegmentRelease, SkipDays};
 use inkdrip_core::pipeline;
 use inkdrip_core::scheduler;
+use inkdrip_core::undo::{FeedSnapshot, HistoryPayload};
 use inkdrip_core::util;
 
+use super::history::push_history;
 use super::{check_auth, check_public_auth, compute_next_delivery, truncate_html};
 use crate::error::{ApiError, ApiResult};
 use crate::state::AppState;
@@ -100,6 +102,15 @@ pub async fn create_feed(
 
     state.store.save_feed(&feed).await?;
     state.store.save_releases(&releases).await?;
+
+    push_history(
+        &state,
+        HistoryPayload::CreateFeed {
+            feed_id: feed.id.clone(),
+        },
+        &format!("Create feed '{}' for '{}'", feed.slug, book.title),
+    )
+    .await;
 
     tracing::info!(
         "Feed '{}' created for '{}': ~{est_days} days",
@@ -198,6 +209,14 @@ pub async fn update_feed(
         .await?
         .ok_or(ApiError(InkDripError::FeedNotFound(id.clone())))?;
 
+    // Capture pre-update state for undo
+    let old_snapshot = FeedSnapshot {
+        schedule_config: feed.schedule_config.clone(),
+        status: feed.status,
+        slug: feed.slug.clone(),
+    };
+    let old_releases = state.store.get_releases_for_feed(&id).await?;
+
     if let Some(status_str) = &req.status {
         let status: FeedStatus = status_str
             .parse()
@@ -252,8 +271,7 @@ pub async fn update_feed(
 
         if !unreleased.is_empty() {
             new_config.start_at = compute_next_delivery(&new_config);
-            let releases =
-                scheduler::compute_release_schedule(&unreleased, &new_config, &id);
+            let releases = scheduler::compute_release_schedule(&unreleased, &new_config, &id);
             state.store.save_releases(&releases).await?;
         }
 
@@ -261,6 +279,28 @@ pub async fn update_feed(
     }
 
     let updated = state.store.get_feed(&id).await?;
+    let new_releases = state.store.get_releases_for_feed(&id).await?;
+
+    if let Some(updated_feed) = &updated {
+        let new_snapshot = FeedSnapshot {
+            schedule_config: updated_feed.schedule_config.clone(),
+            status: updated_feed.status,
+            slug: updated_feed.slug.clone(),
+        };
+        push_history(
+            &state,
+            HistoryPayload::UpdateFeed {
+                feed_id: id.clone(),
+                old_state: old_snapshot,
+                new_state: new_snapshot,
+                old_releases,
+                new_releases,
+            },
+            &format!("Update feed '{id}'"),
+        )
+        .await;
+    }
+
     Ok(Json(serde_json::json!({ "feed": updated })))
 }
 
@@ -278,7 +318,17 @@ pub async fn delete_feed(
         .get_feed(&id)
         .await?
         .ok_or(ApiError(InkDripError::FeedNotFound(id.clone())))?;
-    state.store.delete_feed(&id).await?;
+    state.store.soft_delete_feed(&id).await?;
+
+    push_history(
+        &state,
+        HistoryPayload::DeleteFeed {
+            feed_id: id.clone(),
+        },
+        &format!("Delete feed '{id}'"),
+    )
+    .await;
+
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -397,6 +447,18 @@ pub async fn advance_feed(
     let count = body.count.unwrap_or(DEFAULT_ADVANCE_COUNT);
     let tz = parse_timezone_offset(&feed.schedule_config.timezone);
     let now = Utc::now().with_timezone(&tz);
+
+    // Capture pre-advance state: the next `count` unreleased segments and full future releases
+    let pre_advance_upcoming = state
+        .store
+        .get_unreleased_segments_for_feed(&id, now, count)
+        .await?;
+    let pre_advance_old: Vec<(String, DateTime<FixedOffset>)> = pre_advance_upcoming
+        .iter()
+        .map(|(_, r)| (r.segment_id.clone(), r.release_at))
+        .collect();
+    let pre_advance_releases = state.store.get_releases_for_feed(&id).await?;
+
     let advanced = state.store.advance_releases(&id, count, now).await?;
 
     // Reschedule all remaining future segments so that tomorrow's delivery
@@ -416,13 +478,33 @@ pub async fn advance_feed(
     if !unreleased.is_empty() {
         let mut next_config = feed.schedule_config.clone();
         next_config.start_at = compute_next_delivery(&feed.schedule_config);
-        let releases =
-            scheduler::compute_release_schedule(&unreleased, &next_config, &id);
+        let releases = scheduler::compute_release_schedule(&unreleased, &next_config, &id);
         state.store.save_releases(&releases).await?;
     }
 
     let book = state.store.get_book(&feed.book_id).await?;
     let total_segments = book.map_or(0, |b| b.total_segments);
+
+    // Capture post-advance state for undo
+    let new_releases_for_advanced: Vec<(String, chrono::DateTime<chrono::FixedOffset>)> =
+        pre_advance_old
+            .iter()
+            .map(|(sid, _)| (sid.clone(), now))
+            .collect();
+    let post_advance_releases = state.store.get_releases_for_feed(&id).await?;
+
+    push_history(
+        &state,
+        HistoryPayload::AdvanceFeed {
+            feed_id: id.clone(),
+            old_releases: pre_advance_old,
+            new_releases: new_releases_for_advanced,
+            pre_advance_releases,
+            post_advance_releases,
+        },
+        &format!("Advance {advanced} segments for feed '{id}'"),
+    )
+    .await;
 
     Ok(Json(serde_json::json!({
         "feed_id": id,
