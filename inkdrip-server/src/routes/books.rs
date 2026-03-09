@@ -303,10 +303,8 @@ pub async fn resplit_book(
         if !new_segments.is_empty() {
             let mut config = feed.schedule_config.clone();
             config.start_at = compute_next_delivery(&config);
-            let mut releases = scheduler::compute_release_schedule(&new_segments, &config);
-            for r in &mut releases {
-                r.feed_id.clone_from(&feed.id);
-            }
+            let releases =
+                scheduler::compute_release_schedule(&new_segments, &config, &feed.id);
             state.store.save_releases(&releases).await?;
         }
     }

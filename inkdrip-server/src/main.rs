@@ -373,10 +373,7 @@ async fn try_persist_auto_feed(
     };
 
     let feed = Feed::new(book_id.to_owned(), slug.to_owned(), schedule.clone());
-    let mut releases = scheduler::compute_release_schedule(segments, &schedule);
-    for r in &mut releases {
-        r.feed_id.clone_from(&feed.id);
-    }
+    let releases = scheduler::compute_release_schedule(segments, &schedule, &feed.id);
 
     state.store.save_feed(&feed).await.context("save feed")?;
     state

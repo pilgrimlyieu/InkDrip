@@ -94,10 +94,7 @@ pub async fn create_feed(
     let feed = Feed::new(book_id.clone(), slug, schedule_config.clone());
 
     let segments = state.store.get_segments(&book_id).await?;
-    let mut releases = scheduler::compute_release_schedule(&segments, &schedule_config);
-    for r in &mut releases {
-        r.feed_id.clone_from(&feed.id);
-    }
+    let releases = scheduler::compute_release_schedule(&segments, &schedule_config, &feed.id);
 
     let est_days = scheduler::estimate_days(book.total_words, schedule_config.words_per_day);
 
@@ -255,10 +252,8 @@ pub async fn update_feed(
 
         if !unreleased.is_empty() {
             new_config.start_at = compute_next_delivery(&new_config);
-            let mut releases = scheduler::compute_release_schedule(&unreleased, &new_config);
-            for r in &mut releases {
-                r.feed_id.clone_from(&id);
-            }
+            let releases =
+                scheduler::compute_release_schedule(&unreleased, &new_config, &id);
             state.store.save_releases(&releases).await?;
         }
 
@@ -421,10 +416,8 @@ pub async fn advance_feed(
     if !unreleased.is_empty() {
         let mut next_config = feed.schedule_config.clone();
         next_config.start_at = compute_next_delivery(&feed.schedule_config);
-        let mut releases = scheduler::compute_release_schedule(&unreleased, &next_config);
-        for r in &mut releases {
-            r.feed_id.clone_from(&id);
-        }
+        let releases =
+            scheduler::compute_release_schedule(&unreleased, &next_config, &id);
         state.store.save_releases(&releases).await?;
     }
 

@@ -1,4 +1,4 @@
-use chrono::{Datelike, TimeZone};
+use chrono::{Datelike, Duration, TimeZone};
 
 use crate::config::{parse_delivery_time, parse_timezone_offset};
 use crate::model::{ScheduleConfig, Segment, SegmentRelease, SkipDays};
@@ -7,12 +7,18 @@ use crate::model::{ScheduleConfig, Segment, SegmentRelease, SkipDays};
 ///
 /// The algorithm distributes segments across days based on `words_per_day`.
 /// Each day's budget is `words_per_day`; segments are assigned to the earliest
-/// day that still has remaining budget. All segments on a given day share
-/// the same `delivery_time`.
+/// day that still has remaining budget.
+///
+/// When multiple segments fall on the same day, a small per-second stagger is
+/// applied so that segment reading order is preserved across all RSS readers
+/// (which may sort by timestamp). The first segment in reading order receives
+/// the largest timestamp within the batch, ensuring correct top-to-bottom
+/// order in newest-first readers.
 #[must_use]
 pub fn compute_release_schedule(
     segments: &[Segment],
     config: &ScheduleConfig,
+    feed_id: &str,
 ) -> Vec<SegmentRelease> {
     let tz = parse_timezone_offset(&config.timezone);
     let delivery_time = parse_delivery_time(&config.delivery_time);
@@ -45,14 +51,44 @@ pub fn compute_release_schedule(
 
         releases.push(SegmentRelease {
             segment_id: segment.id.clone(),
-            feed_id: String::new(), // Caller sets this
+            feed_id: feed_id.to_owned(),
             release_at,
         });
 
         daily_remaining -= word_count;
     }
 
+    // Stagger same-day releases so reading order is deterministic.
+    // Within each batch sharing a timestamp, segment k (0-indexed in reading
+    // order) gets an offset of (N-1-k) seconds. This makes the first segment
+    // have the largest timestamp, placing it at the top in newest-first readers.
+    stagger_same_day_releases(&mut releases);
+
     releases
+}
+
+/// Add per-second offsets to releases that share the same base timestamp.
+fn stagger_same_day_releases(releases: &mut [SegmentRelease]) {
+    let mut i = 0;
+    while i < releases.len() {
+        // Find the end of the batch sharing the same release_at
+        let Some(base_release) = releases.get(i) else {
+            break;
+        };
+        let base = base_release.release_at;
+        let mut j = i + 1;
+        while releases.get(j).is_some_and(|r| r.release_at == base) {
+            j += 1;
+        }
+        let batch_size = j - i;
+        if batch_size > 1 && let Some(batch) = releases.get_mut(i..j) {
+            for (k, release) in batch.iter_mut().enumerate() {
+                let offset_secs = (batch_size - 1 - k) as i64;
+                release.release_at += Duration::seconds(offset_secs);
+            }
+        }
+        i = j;
+    }
 }
 
 /// Advance a date by one day, skipping any days in `skip_days`.
@@ -119,8 +155,13 @@ mod tests {
             timezone: "UTC+8".to_owned(),
         };
 
-        let releases = compute_release_schedule(&segments, &config);
+        let releases = compute_release_schedule(&segments, &config, "feed-1");
         assert_eq!(releases.len(), 4);
+
+        // All releases should have the correct feed_id
+        for r in &releases {
+            assert_eq!(r.feed_id, "feed-1");
+        }
 
         // First two segments should be on day 1, next two on day 2
         assert_eq!(
@@ -131,6 +172,9 @@ mod tests {
             releases[1].release_at.date_naive(),
             releases[2].release_at.date_naive()
         );
+
+        // Stagger: first segment in batch has higher timestamp
+        assert!(releases[0].release_at > releases[1].release_at);
     }
 
     #[test]
@@ -148,7 +192,7 @@ mod tests {
             timezone: "UTC".to_owned(),
         };
 
-        let releases = compute_release_schedule(&segments, &config);
+        let releases = compute_release_schedule(&segments, &config, "feed-1");
         assert_eq!(releases.len(), 3);
 
         // Day 1: Friday, Day 2: Monday (skipping Sat/Sun), Day 3: Tuesday
