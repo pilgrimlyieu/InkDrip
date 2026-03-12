@@ -5,10 +5,14 @@
 //! output is treated as a no-op (the original data is kept) so that a
 //! misbehaving script never corrupts the pipeline.
 
+use std::env;
+use std::fs::{self, File, OpenOptions};
 use std::io::Write as _;
-use std::process::{Command, Stdio};
+use std::path::PathBuf;
+use std::process::{Command, Stdio, id};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 
@@ -101,11 +105,14 @@ fn invoke_command(command: &str, stdin_data: &str, timeout: Duration) -> Result<
         .split_first()
         .ok_or_else(|| InkDripError::ConfigError("hook command is empty".into()))?;
 
+    let (stdout_file, stdout_path) = create_hook_output_file("stdout")?;
+    let (stderr_file, stderr_path) = create_hook_output_file("stderr")?;
+
     let mut child = Command::new(program)
         .args(args)
         .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
+        .stdout(Stdio::from(stdout_file))
+        .stderr(Stdio::from(stderr_file))
         .spawn()
         .map_err(|e| InkDripError::Other(anyhow::anyhow!("failed to spawn hook: {e}")))?;
 
@@ -117,45 +124,77 @@ fn invoke_command(command: &str, stdin_data: &str, timeout: Duration) -> Result<
 
     // Poll for completion, enforcing the deadline.
     let deadline = Instant::now() + timeout;
-    loop {
-        if child
+    let status = loop {
+        if let Some(status) = child
             .try_wait()
             .map_err(|e| InkDripError::Other(anyhow::anyhow!("hook wait error: {e}")))?
-            .is_some()
         {
-            break;
+            break status;
         }
         if Instant::now() >= deadline {
             let _ = child.kill();
             let _ = child.wait(); // reap to avoid zombie
+            cleanup_capture_files(&stdout_path, &stderr_path);
             return Err(InkDripError::Other(anyhow::anyhow!(
                 "hook timed out after {}s",
                 timeout.as_secs()
             )));
         }
         thread::sleep(Duration::from_millis(50));
-    }
+    };
 
-    // Process has exited; collect remaining output from the kernel pipe buffer.
-    let output = child
-        .wait_with_output()
-        .map_err(|e| InkDripError::Other(anyhow::anyhow!("hook output error: {e}")))?;
+    let stdout_buf = fs::read(&stdout_path)
+        .map_err(|e| InkDripError::Other(anyhow::anyhow!("hook stdout read error: {e}")))?;
+    let stderr_buf = fs::read(&stderr_path)
+        .map_err(|e| InkDripError::Other(anyhow::anyhow!("hook stderr read error: {e}")))?;
+    cleanup_capture_files(&stdout_path, &stderr_path);
 
     // Log stderr for debugging.
-    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stderr = String::from_utf8_lossy(&stderr_buf);
     if !stderr.is_empty() {
         tracing::debug!("hook stderr: {stderr}");
     }
 
-    if !output.status.success() {
+    if !status.success() {
         return Err(InkDripError::Other(anyhow::anyhow!(
-            "hook exited with status {}",
-            output.status
+            "hook exited with status {status}"
         )));
     }
 
-    String::from_utf8(output.stdout)
+    String::from_utf8(stdout_buf)
         .map_err(|e| InkDripError::Other(anyhow::anyhow!("hook stdout is not UTF-8: {e}")))
+}
+
+fn create_hook_output_file(kind: &str) -> Result<(File, PathBuf)> {
+    static NEXT_ID: AtomicU64 = AtomicU64::new(0);
+
+    let now_nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|e| InkDripError::Other(anyhow::anyhow!("system clock error: {e}")))?
+        .as_nanos();
+    let seq = NEXT_ID.fetch_add(1, Ordering::Relaxed);
+    let path = env::temp_dir().join(format!(
+        "inkdrip-hook-{}-{}-{}-{}.log",
+        kind,
+        id(),
+        now_nanos,
+        seq
+    ));
+
+    let file = OpenOptions::new()
+        .create_new(true)
+        .write(true)
+        .open(&path)
+        .map_err(|e| {
+            InkDripError::Other(anyhow::anyhow!("failed to create hook temp file: {e}"))
+        })?;
+
+    Ok((file, path))
+}
+
+fn cleanup_capture_files(stdout_path: &PathBuf, stderr_path: &PathBuf) {
+    let _ = fs::remove_file(stdout_path);
+    let _ = fs::remove_file(stderr_path);
 }
 
 #[cfg(test)]
@@ -207,5 +246,12 @@ mod tests {
         let result: Result<Option<serde_json::Value>> =
             run_hook("test", &entry, &serde_json::json!({}), 5);
         assert!(result.unwrap().is_none());
+    }
+
+    #[test]
+    fn large_stdout_does_not_deadlock() {
+        let output = invoke_command("seq 1 70000", "{}", Duration::from_secs(5)).unwrap();
+        assert!(output.starts_with("1\n"));
+        assert!(output.contains("70000\n"));
     }
 }
