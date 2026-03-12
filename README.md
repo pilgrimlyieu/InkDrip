@@ -77,6 +77,14 @@ cargo build --release
 
 The CLI communicates with the running server via HTTP API.
 
+**Global flags** available on all commands:
+
+| Flag      | Env var         | Default                 | Description                  |
+| --------- | --------------- | ----------------------- | ---------------------------- |
+| `--url`   | `INKDRIP_URL`   | `http://localhost:8080` | Server URL                   |
+| `--token` | `INKDRIP_TOKEN` | *(empty)*               | API token for authentication |
+| `--json`  | —               | —                       | Output raw JSON              |
+
 ```bash
 # Set server URL (or use --url flag)
 export INKDRIP_URL=http://localhost:8080
@@ -84,34 +92,49 @@ export INKDRIP_URL=http://localhost:8080
 # Upload a book
 inkdrip add my-book.epub --title "My Book" --author "Author Name"
 
-# List books
+# List books / feeds
 inkdrip list books
+inkdrip list feeds
 
 # Create a feed
 inkdrip feed create <BOOK_ID> --words-per-day 3000 --delivery-time 08:00
 
-# List feeds with progress
-inkdrip list feeds
-
-# Pause / resume a feed
+# Pause / resume / check status
 inkdrip feed pause <FEED_ID>
 inkdrip feed resume <FEED_ID>
-
-# Check feed status
 inkdrip feed status <FEED_ID>
 
-# Remove a book
+# Advance N upcoming segments immediately (default: 1)
+inkdrip feed advance <FEED_ID> --count 3
+
+# Edit book metadata or feed configuration
+inkdrip edit book <BOOK_ID> --title "New Title" --author "New Author"
+inkdrip edit feed <FEED_ID> --words-per-day 2000 --delivery-time 09:00
+
+# Re-split a book (preserves already-released segments)
+inkdrip resplit <BOOK_ID> --target-words 1200
+
+# Read a specific segment
+inkdrip read <BOOK_ID> <SEGMENT_INDEX>
+
+# Remove a book and all its feeds
 inkdrip remove <BOOK_ID>
 
-# Undo / redo
+# Undo / redo / history
 inkdrip history list            # Show recent operations
 inkdrip history undo            # Undo the last operation
 inkdrip history redo            # Redo the last undone operation
+inkdrip history clear           # Clear history and purge soft-deleted resources
 
 # Aggregate feeds
-inkdrip aggregate create --title "Daily Reading" --feeds <FEED_ID_1>,<FEED_ID_2>
+inkdrip aggregate create <SLUG> --title "Daily Reading" --feeds <SLUG_1> --feeds <SLUG_2>
 inkdrip aggregate list
 inkdrip aggregate delete <AGGREGATE_ID>
+
+# Debug / inspect
+inkdrip debug segments <BOOK_ID>         # List all segments
+inkdrip debug releases <FEED_ID>         # List release schedule
+inkdrip debug preview <FEED_ID> --limit 5  # Preview upcoming segments
 ```
 
 ## Configuration
@@ -130,18 +153,31 @@ INKDRIP__WATCH__ENABLED=true
 
 ### Key settings
 
-| Setting                         | Default                 | Description                                |
-| ------------------------------- | ----------------------- | ------------------------------------------ |
-| `server.base_url`               | `http://localhost:8080` | Public URL for feed links and images       |
-| `server.api_token`              | *(empty)*               | Bearer token for API auth; empty = no auth |
+| Setting                         | Default                 | Description                                                                    |
+| ------------------------------- | ----------------------- | ------------------------------------------------------------------------------ |
+| `server.host`                   | `0.0.0.0`               | Address to bind the HTTP server                                                |
+| `server.port`                   | `8080`                  | Port to listen on                                                              |
+| `server.base_url`               | `http://localhost:8080` | Public URL for feed links and images                                           |
+| `server.api_token`              | *(empty)*               | Bearer token for API auth; empty = no auth                                     |
 | `server.public_feeds`           | `true`                  | Allow feed/OPML/aggregate endpoints without auth; set `false` to require token |
-| `defaults.words_per_day`        | `3000`                  | Default daily word budget                  |
-| `defaults.target_segment_words` | `1500`                  | Target words per segment                   |
-| `defaults.delivery_time`        | `08:00`                 | Daily release time (HH:MM)                 |
-| `defaults.timezone`             | `Asia/Shanghai`         | Timezone for scheduling                    |
-| `defaults.skip_days`            | `[]`                    | Days to skip (see below)                   |
-| `watch.enabled`                 | `false`                 | Auto-import books from a directory         |
-| `history.stack_depth`           | `50`                    | Max undo operations retained               |
+| `server.max_upload_bytes`       | `52428800`              | Maximum upload size in bytes (50 MiB)                                          |
+| `storage.data_dir`              | `./data`                | Directory for database, books, and images                                      |
+| `defaults.words_per_day`        | `3000`                  | Default daily word budget                                                      |
+| `defaults.target_segment_words` | `1500`                  | Target words per segment                                                       |
+| `defaults.max_segment_words`    | `2000`                  | Maximum words per segment                                                      |
+| `defaults.min_segment_words`    | `500`                   | Minimum words per segment                                                      |
+| `defaults.delivery_time`        | `08:00`                 | Daily release time (HH:MM)                                                     |
+| `defaults.timezone`             | `Asia/Shanghai`         | Timezone for scheduling                                                        |
+| `defaults.skip_days`            | `[]`                    | Days to skip (see below)                                                       |
+| `watch.enabled`                 | `false`                 | Auto-import books from a directory                                             |
+| `watch.dir`                     | `./books`               | Directory to watch for new book files                                          |
+| `watch.auto_create_feed`        | `true`                  | Auto-create a feed when a book is detected                                     |
+| `watch.scan_interval_secs`      | `300`                   | How often to scan the directory (seconds)                                      |
+| `feed.format`                   | `atom`                  | Default feed format (`atom` or `rss`)                                          |
+| `feed.items_limit`              | `50`                    | Max items returned per feed request                                            |
+| `history.stack_depth`           | `50`                    | Max undo operations retained                                                   |
+
+See [config.example.toml](config.example.toml) for the full config reference including `[transforms]`, `[hooks]`, `[parser.txt]`, and `[[aggregates]]` sections.
 
 ### Skip Days
 
@@ -166,42 +202,50 @@ Example: `skip_days = ["saturday", "sunday"]` to skip weekends.
 
 ### Books
 
-| Method   | Endpoint         | Description                                                 |
-| -------- | ---------------- | ----------------------------------------------------------- |
-| `POST`   | `/api/books`     | Upload book (multipart: `file`, optional `title`, `author`) |
-| `GET`    | `/api/books`     | List all books                                              |
-| `GET`    | `/api/books/:id` | Book details with segments and feeds                        |
-| `DELETE` | `/api/books/:id` | Delete book and all associated feeds                        |
+| Method   | Endpoint                         | Description                                                 |
+| -------- | -------------------------------- | ----------------------------------------------------------- |
+| `POST`   | `/api/books`                     | Upload book (multipart: `file`, optional `title`, `author`) |
+| `GET`    | `/api/books`                     | List all books                                              |
+| `GET`    | `/api/books/:id`                 | Book details with segments and feeds                        |
+| `PATCH`  | `/api/books/:id`                 | Update book metadata                                        |
+| `DELETE` | `/api/books/:id`                 | Delete book and all associated feeds                        |
+| `GET`    | `/api/books/:id/segments`        | List all segments for a book                                |
+| `GET`    | `/api/books/:id/segments/:index` | Read a specific segment                                     |
+| `POST`   | `/api/books/:id/resplit`         | Re-split book (preserves released segments)                 |
 
 ### Feeds
 
-| Method   | Endpoint               | Description                    |
-| -------- | ---------------------- | ------------------------------ |
-| `POST`   | `/api/books/:id/feeds` | Create feed for a book         |
-| `GET`    | `/api/feeds`           | List all feeds with progress   |
-| `GET`    | `/api/feeds/:id`       | Feed details                   |
-| `PATCH`  | `/api/feeds/:id`       | Update feed (status, schedule) |
-| `DELETE` | `/api/feeds/:id`       | Delete feed                    |
+| Method   | Endpoint                  | Description                             |
+| -------- | ------------------------- | --------------------------------------- |
+| `POST`   | `/api/books/:id/feeds`    | Create feed for a book                  |
+| `GET`    | `/api/feeds`              | List all feeds with progress            |
+| `GET`    | `/api/feeds/:id`          | Feed details                            |
+| `PATCH`  | `/api/feeds/:id`          | Update feed (status, schedule)          |
+| `DELETE` | `/api/feeds/:id`          | Delete feed                             |
+| `GET`    | `/api/feeds/:id/releases` | List release schedule                   |
+| `GET`    | `/api/feeds/:id/preview`  | Preview upcoming unreleased segments    |
+| `POST`   | `/api/feeds/:id/advance`  | Advance N upcoming segments immediately |
 
 ### Aggregates
 
-| Method   | Endpoint                               | Description           |
-| -------- | -------------------------------------- | --------------------- |
-| `POST`   | `/api/aggregates`                      | Create aggregate feed |
-| `GET`    | `/api/aggregates`                      | List all aggregates   |
-| `GET`    | `/api/aggregates/:id`                  | Aggregate details     |
-| `PATCH`  | `/api/aggregates/:id`                  | Update aggregate      |
-| `DELETE` | `/api/aggregates/:id`                  | Delete aggregate      |
-| `POST`   | `/api/aggregates/:id/sources/:feed_id` | Add source feed       |
-| `DELETE` | `/api/aggregates/:id/sources/:feed_id` | Remove source feed    |
+| Method   | Endpoint                             | Description           |
+| -------- | ------------------------------------ | --------------------- |
+| `POST`   | `/api/aggregates`                    | Create aggregate feed |
+| `GET`    | `/api/aggregates`                    | List all aggregates   |
+| `GET`    | `/api/aggregates/:id`                | Aggregate details     |
+| `PATCH`  | `/api/aggregates/:id`                | Update aggregate      |
+| `DELETE` | `/api/aggregates/:id`                | Delete aggregate      |
+| `POST`   | `/api/aggregates/:id/feeds/:feed_id` | Add source feed       |
+| `DELETE` | `/api/aggregates/:id/feeds/:feed_id` | Remove source feed    |
 
 ### History
 
-| Method | Endpoint            | Description                    |
-| ------ | ------------------- | ------------------------------ |
-| `GET`  | `/api/history`      | List recent operations         |
-| `POST` | `/api/history/undo` | Undo the last operation        |
-| `POST` | `/api/history/redo` | Redo the last undone operation |
+| Method   | Endpoint            | Description                               |
+| -------- | ------------------- | ----------------------------------------- |
+| `GET`    | `/api/history`      | List recent operations                    |
+| `POST`   | `/api/history/undo` | Undo the last operation                   |
+| `POST`   | `/api/history/redo` | Redo the last undone operation            |
+| `DELETE` | `/api/history`      | Clear history and purge soft-deleted data |
 
 ### Public Endpoints
 
@@ -258,11 +302,11 @@ The workspace is split into independent crates for modularity. The storage layer
 
 ## Supported Formats
 
-| Format     | Extension | Chapter Detection                             |
-| ---------- | --------- | --------------------------------------------- |
-| EPUB       | `.epub`   | EPUB spine (reading order)                    |
-| Plain Text | `.txt`    | `===` separator lines or multiple blank lines |
-| Markdown   | `.md`     | `#` and `##` headings                         |
+| Format     | Extension          | Chapter Detection                             |
+| ---------- | ------------------ | --------------------------------------------- |
+| EPUB       | `.epub`            | EPUB spine (reading order)                    |
+| Plain Text | `.txt`, `.text`    | `===` separator lines or multiple blank lines |
+| Markdown   | `.md`, `.markdown` | `#` and `##` headings                         |
 
 ## Documentation
 
@@ -272,4 +316,4 @@ The workspace is split into independent crates for modularity. The storage layer
 
 ## License
 
-MIT
+[AGPL-3.0](LICENSE)

@@ -75,6 +75,14 @@ cargo build --release
 
 CLI 通过 HTTP API 与运行中的服务器通信。
 
+**全局参数**（适用于所有命令）：
+
+| 参数      | 环境变量        | 默认值                  | 说明           |
+| --------- | --------------- | ----------------------- | -------------- |
+| `--url`   | `INKDRIP_URL`   | `http://localhost:8080` | 服务器地址     |
+| `--token` | `INKDRIP_TOKEN` | *(空)*                  | API 认证 Token |
+| `--json`  | —               | —                       | 输出原始 JSON  |
+
 ```bash
 # 设置服务器地址（或使用 --url 参数）
 export INKDRIP_URL=http://localhost:8080
@@ -82,34 +90,49 @@ export INKDRIP_URL=http://localhost:8080
 # 上传书籍
 inkdrip add my-book.epub --title "书名" --author "作者名"
 
-# 列出所有书籍
+# 列出书籍 / 订阅
 inkdrip list books
+inkdrip list feeds
 
 # 创建订阅
 inkdrip feed create <BOOK_ID> --words-per-day 3000 --delivery-time 08:00
 
-# 列出订阅及进度
-inkdrip list feeds
-
-# 暂停 / 恢复订阅
+# 暂停 / 恢复 / 查看状态
 inkdrip feed pause <FEED_ID>
 inkdrip feed resume <FEED_ID>
-
-# 查看订阅状态
 inkdrip feed status <FEED_ID>
 
-# 删除书籍
+# 立即推进 N 个即将发布的片段（默认: 1）
+inkdrip feed advance <FEED_ID> --count 3
+
+# 编辑书籍元数据或订阅配置
+inkdrip edit book <BOOK_ID> --title "新标题" --author "新作者"
+inkdrip edit feed <FEED_ID> --words-per-day 2000 --delivery-time 09:00
+
+# 重新分段（保留已发布的片段）
+inkdrip resplit <BOOK_ID> --target-words 1200
+
+# 阅读指定片段
+inkdrip read <BOOK_ID> <SEGMENT_INDEX>
+
+# 删除书籍及其所有订阅
 inkdrip remove <BOOK_ID>
 
-# 撤销 / 重做
+# 撤销 / 重做 / 历史
 inkdrip history list            # 查看近期操作历史
 inkdrip history undo            # 撤销上一步操作
 inkdrip history redo            # 重做上一步撤销
+inkdrip history clear           # 清除历史并永久删除软删除资源
 
 # 聚合订阅
-inkdrip aggregate create --title "每日阅读" --feeds <FEED_ID_1>,<FEED_ID_2>
+inkdrip aggregate create <SLUG> --title "每日阅读" --feeds <SLUG_1> --feeds <SLUG_2>
 inkdrip aggregate list
 inkdrip aggregate delete <AGGREGATE_ID>
+
+# 调试 / 查看
+inkdrip debug segments <BOOK_ID>         # 列出所有片段
+inkdrip debug releases <FEED_ID>         # 列出发布时间表
+inkdrip debug preview <FEED_ID> --limit 5  # 预览即将发布的片段
 ```
 
 ## 配置
@@ -127,18 +150,31 @@ INKDRIP__WATCH__ENABLED=true
 
 ### 主要配置项
 
-| 配置项                          | 默认值                  | 说明                                    |
-| ------------------------------- | ----------------------- | --------------------------------------- |
-| `server.base_url`               | `http://localhost:8080` | 用于生成订阅链接的公开 URL              |
-| `server.api_token`              | *(空)*                  | API 认证 Bearer Token；为空则不启用认证 |
+| 配置项                          | 默认值                  | 说明                                                       |
+| ------------------------------- | ----------------------- | ---------------------------------------------------------- |
+| `server.host`                   | `0.0.0.0`               | HTTP 服务器绑定地址                                        |
+| `server.port`                   | `8080`                  | 监听端口                                                   |
+| `server.base_url`               | `http://localhost:8080` | 用于生成订阅链接的公开 URL                                 |
+| `server.api_token`              | *(空)*                  | API 认证 Bearer Token；为空则不启用认证                    |
 | `server.public_feeds`           | `true`                  | 订阅/OPML/聚合端点是否公开；设为 `false` 则需要 Token 认证 |
-| `defaults.words_per_day`        | `3000`                  | 每日阅读字数预算                        |
-| `defaults.target_segment_words` | `1500`                  | 每段目标字数                            |
-| `defaults.delivery_time`        | `08:00`                 | 每日发布时间（HH:MM）                   |
-| `defaults.timezone`             | `Asia/Shanghai`         | 排程使用的时区                          |
-| `defaults.skip_days`            | `[]`                    | 跳过的日期（见下方）                    |
-| `watch.enabled`                 | `false`                 | 是否自动导入目录中的书籍                |
-| `history.stack_depth`           | `50`                    | 最多保留的撤销操作数                  |
+| `server.max_upload_bytes`       | `52428800`              | 最大上传文件大小（字节），默认 50 MiB                      |
+| `storage.data_dir`              | `./data`                | 数据库、书籍及图片存储目录                                 |
+| `defaults.words_per_day`        | `3000`                  | 每日阅读字数预算                                           |
+| `defaults.target_segment_words` | `1500`                  | 每段目标字数                                               |
+| `defaults.max_segment_words`    | `2000`                  | 每段最大字数                                               |
+| `defaults.min_segment_words`    | `500`                   | 每段最小字数                                               |
+| `defaults.delivery_time`        | `08:00`                 | 每日发布时间（HH:MM）                                      |
+| `defaults.timezone`             | `Asia/Shanghai`         | 排程使用的时区                                             |
+| `defaults.skip_days`            | `[]`                    | 跳过的日期（见下方）                                       |
+| `watch.enabled`                 | `false`                 | 是否自动导入目录中的书籍                                   |
+| `watch.dir`                     | `./books`               | 监控的书籍目录                                             |
+| `watch.auto_create_feed`        | `true`                  | 检测到新书时自动创建订阅                                   |
+| `watch.scan_interval_secs`      | `300`                   | 目录扫描间隔（秒）                                         |
+| `feed.format`                   | `atom`                  | 默认订阅格式（`atom` 或 `rss`）                            |
+| `feed.items_limit`              | `50`                    | 每次请求返回的最大条目数                                   |
+| `history.stack_depth`           | `50`                    | 最多保留的撤销操作数                                       |
+
+完整配置参考（含 `[transforms]`、`[hooks]`、`[parser.txt]`、`[[aggregates]]` 等）请参见 [config.example.toml](config.example.toml)。
 
 ### 跳过日期
 
@@ -163,42 +199,50 @@ INKDRIP__WATCH__ENABLED=true
 
 ### 书籍
 
-| 方法     | 路径             | 说明                                                  |
-| -------- | ---------------- | ----------------------------------------------------- |
-| `POST`   | `/api/books`     | 上传书籍（multipart：`file`，可选 `title`、`author`） |
-| `GET`    | `/api/books`     | 列出所有书籍                                          |
-| `GET`    | `/api/books/:id` | 书籍详情（含章节与订阅源）                            |
-| `DELETE` | `/api/books/:id` | 删除书籍及其所有订阅                                  |
+| 方法     | 路径                             | 说明                                                  |
+| -------- | -------------------------------- | ----------------------------------------------------- |
+| `POST`   | `/api/books`                     | 上传书籍（multipart：`file`，可选 `title`、`author`） |
+| `GET`    | `/api/books`                     | 列出所有书籍                                          |
+| `GET`    | `/api/books/:id`                 | 书籍详情（含章节与订阅源）                            |
+| `PATCH`  | `/api/books/:id`                 | 更新书籍元数据                                        |
+| `DELETE` | `/api/books/:id`                 | 删除书籍及其所有订阅                                  |
+| `GET`    | `/api/books/:id/segments`        | 列出书籍的所有片段                                    |
+| `GET`    | `/api/books/:id/segments/:index` | 读取指定片段                                          |
+| `POST`   | `/api/books/:id/resplit`         | 重新分段（保留已发布的片段）                          |
 
 ### 订阅
 
-| 方法     | 路径                   | 说明                     |
-| -------- | ---------------------- | ------------------------ |
-| `POST`   | `/api/books/:id/feeds` | 为书籍创建订阅           |
-| `GET`    | `/api/feeds`           | 列出所有订阅及进度       |
-| `GET`    | `/api/feeds/:id`       | 订阅详情                 |
-| `PATCH`  | `/api/feeds/:id`       | 更新订阅（状态、计划等） |
-| `DELETE` | `/api/feeds/:id`       | 删除订阅                 |
+| 方法     | 路径                      | 说明                     |
+| -------- | ------------------------- | ------------------------ |
+| `POST`   | `/api/books/:id/feeds`    | 为书籍创建订阅           |
+| `GET`    | `/api/feeds`              | 列出所有订阅及进度       |
+| `GET`    | `/api/feeds/:id`          | 订阅详情                 |
+| `PATCH`  | `/api/feeds/:id`          | 更新订阅（状态、计划等） |
+| `DELETE` | `/api/feeds/:id`          | 删除订阅                 |
+| `GET`    | `/api/feeds/:id/releases` | 查看发布时间表           |
+| `GET`    | `/api/feeds/:id/preview`  | 预览即将发布的片段       |
+| `POST`   | `/api/feeds/:id/advance`  | 立即推进即将发布的片段   |
 
 ### 聚合订阅
 
-| 方法     | 路径                                   | 说明             |
-| -------- | -------------------------------------- | ---------------- |
-| `POST`   | `/api/aggregates`                      | 创建聚合订阅     |
-| `GET`    | `/api/aggregates`                      | 列出所有聚合订阅 |
-| `GET`    | `/api/aggregates/:id`                  | 聚合订阅详情     |
-| `PATCH`  | `/api/aggregates/:id`                  | 更新聚合订阅     |
-| `DELETE` | `/api/aggregates/:id`                  | 删除聚合订阅     |
-| `POST`   | `/api/aggregates/:id/sources/:feed_id` | 添加源订阅       |
-| `DELETE` | `/api/aggregates/:id/sources/:feed_id` | 移除源订阅       |
+| 方法     | 路径                                 | 说明             |
+| -------- | ------------------------------------ | ---------------- |
+| `POST`   | `/api/aggregates`                    | 创建聚合订阅     |
+| `GET`    | `/api/aggregates`                    | 列出所有聚合订阅 |
+| `GET`    | `/api/aggregates/:id`                | 聚合订阅详情     |
+| `PATCH`  | `/api/aggregates/:id`                | 更新聚合订阅     |
+| `DELETE` | `/api/aggregates/:id`                | 删除聚合订阅     |
+| `POST`   | `/api/aggregates/:id/feeds/:feed_id` | 添加源订阅       |
+| `DELETE` | `/api/aggregates/:id/feeds/:feed_id` | 移除源订阅       |
 
 ### 操作历史
 
-| 方法   | 路径                | 说明             |
-| ------ | ------------------- | ---------------- |
-| `GET`  | `/api/history`      | 查看近期操作历史 |
-| `POST` | `/api/history/undo` | 撤销上一步操作   |
-| `POST` | `/api/history/redo` | 重做上一步撤销   |
+| 方法     | 路径                | 说明                         |
+| -------- | ------------------- | ---------------------------- |
+| `GET`    | `/api/history`      | 查看近期操作历史             |
+| `POST`   | `/api/history/undo` | 撤销上一步操作               |
+| `POST`   | `/api/history/redo` | 重做上一步撤销               |
+| `DELETE` | `/api/history`      | 清除历史并永久删除软删除资源 |
 
 ### 公开端点
 
@@ -255,11 +299,11 @@ inkdrip-cli/            命令行工具（clap + reqwest）
 
 ## 支持的格式
 
-| 格式     | 扩展名  | 章节识别方式               |
-| -------- | ------- | -------------------------- |
-| EPUB     | `.epub` | EPUB spine（阅读顺序）     |
-| 纯文本   | `.txt`  | `===` 分隔线或多个连续空行 |
-| Markdown | `.md`   | `#` 和 `##` 标题           |
+| 格式     | 扩展名             | 章节识别方式               |
+| -------- | ------------------ | -------------------------- |
+| EPUB     | `.epub`            | EPUB spine（阅读顺序）     |
+| 纯文本   | `.txt`、`.text`    | `===` 分隔线或多个连续空行 |
+| Markdown | `.md`、`.markdown` | `#` 和 `##` 标题           |
 
 ## 文档
 
@@ -269,4 +313,4 @@ inkdrip-cli/            命令行工具（clap + reqwest）
 
 ## 许可证
 
-MIT
+[AGPL-3.0](LICENSE)
