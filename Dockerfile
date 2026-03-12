@@ -29,7 +29,7 @@ COPY inkdrip-cli/src inkdrip-cli/src
 
 # Touch source files to invalidate cache for our code only
 RUN touch inkdrip-core/src/lib.rs inkdrip-store-sqlite/src/lib.rs \
-          inkdrip-server/src/main.rs inkdrip-cli/src/main.rs
+    inkdrip-server/src/main.rs inkdrip-cli/src/main.rs
 
 # Build release binaries
 RUN cargo build --release --bin inkdrip-server --bin inkdrip-cli
@@ -48,9 +48,6 @@ WORKDIR /data
 
 EXPOSE 8080
 
-ENV INKDRIP__SERVER__HOST=0.0.0.0 \
-    INKDRIP__SERVER__PORT=8080 \
-    INKDRIP__STORAGE__DATA_DIR=/data \
-    INKDRIP_CONFIG=/data/config.toml
+ENV INKDRIP__STORAGE__DATA_DIR=/data
 
 CMD ["inkdrip-server"]

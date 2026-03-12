@@ -97,16 +97,22 @@ impl ApiClient {
     pub async fn create_feed(
         &self,
         book_id: &str,
-        words_per_day: u32,
-        delivery_time: &str,
+        words_per_day: Option<u32>,
+        delivery_time: Option<String>,
         slug: Option<String>,
-        skip_days: u8,
+        skip_days: Option<u8>,
         start_at: Option<String>,
     ) -> Result<Value> {
         let mut obj = serde_json::Map::new();
-        obj.insert("words_per_day".to_owned(), serde_json::json!(words_per_day));
-        obj.insert("delivery_time".to_owned(), serde_json::json!(delivery_time));
-        obj.insert("skip_days".to_owned(), serde_json::json!(skip_days));
+        if let Some(w) = words_per_day {
+            obj.insert("words_per_day".to_owned(), serde_json::json!(w));
+        }
+        if let Some(d) = delivery_time {
+            obj.insert("delivery_time".to_owned(), serde_json::json!(d));
+        }
+        if let Some(s) = skip_days {
+            obj.insert("skip_days".to_owned(), serde_json::json!(s));
+        }
         if let Some(s) = slug {
             obj.insert("slug".to_owned(), serde_json::json!(s));
         }

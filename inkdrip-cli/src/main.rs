@@ -118,18 +118,19 @@ enum FeedAction {
     Create {
         /// Book ID
         book_id: String,
-        /// Words to release per day
-        #[arg(long, default_value = "3000")]
-        words_per_day: u32,
-        /// Delivery time (HH:MM)
-        #[arg(long, default_value = "08:00")]
-        delivery_time: String,
+        /// Words to release per day (uses server default from config.toml if omitted)
+        #[arg(long)]
+        words_per_day: Option<u32>,
+        /// Delivery time in HH:MM format (uses server default from config.toml if omitted)
+        #[arg(long)]
+        delivery_time: Option<String>,
         /// Custom slug for the feed URL
         #[arg(long)]
         slug: Option<String>,
         /// Days to skip delivery (bitflags: Mon=1,Tue=2,Wed=4,Thu=8,Fri=16,Sat=32,Sun=64; weekends=96)
-        #[arg(long, default_value = "0")]
-        skip_days: u8,
+        /// Uses server default from config.toml if omitted.
+        #[arg(long)]
+        skip_days: Option<u8>,
         /// Start date (ISO 8601, default: tomorrow)
         #[arg(long)]
         start: Option<String>,
@@ -311,7 +312,7 @@ async fn main() -> Result<()> {
                     .create_feed(
                         &book_id,
                         words_per_day,
-                        &delivery_time,
+                        delivery_time,
                         slug,
                         skip_days,
                         start,
