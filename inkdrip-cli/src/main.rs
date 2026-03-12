@@ -260,6 +260,8 @@ enum HistoryAction {
         #[arg(long, default_value = "20")]
         limit: u32,
     },
+    /// Clear all history and permanently remove soft-deleted resources
+    Clear,
 }
 
 /// Print API response as JSON or formatted output.
@@ -456,6 +458,10 @@ async fn main() -> Result<()> {
                 print_output(json_mode, &entries, || {
                     output::print_history_table(&entries);
                 });
+            }
+            HistoryAction::Clear => {
+                client.clear_history().await?;
+                println!("History cleared.");
             }
         },
     }

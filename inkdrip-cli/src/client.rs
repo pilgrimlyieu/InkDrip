@@ -354,6 +354,17 @@ impl ApiClient {
             .await?;
         handle_response(resp).await
     }
+
+    pub async fn clear_history(&self) -> Result<()> {
+        let resp = self.request(Method::DELETE, "/api/history").send().await?;
+        let status = resp.status();
+        if status.is_success() {
+            Ok(())
+        } else {
+            let body = resp.text().await.unwrap_or_default();
+            anyhow::bail!("{}", extract_error_message(&body))
+        }
+    }
 }
 
 /// Extract a human-readable error message from an API JSON error body.

@@ -183,4 +183,10 @@ pub trait BookStore: Send + Sync {
 
     /// List recent undo history entries (newest first).
     async fn list_undo_history(&self, limit: u32) -> Result<Vec<UndoEntry>>;
+
+    /// Clear all undo/redo history and hard-delete all soft-deleted resources.
+    ///
+    /// Soft-deleted books and feeds exist solely as undo/redo targets; once
+    /// history is cleared they become unreachable orphans and must be purged.
+    async fn clear_history(&self) -> Result<()>;
 }

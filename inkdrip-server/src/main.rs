@@ -175,6 +175,7 @@ fn build_router(state: AppState) -> Router {
         .route("/api/aggregates/{id}/feeds/{feed_id}", delete(routes::aggregates::remove_source))
         // History / undo / redo API
         .route("/api/history", get(routes::history::list_history))
+        .route("/api/history", delete(routes::history::clear_history))
         .route("/api/history/undo", post(routes::history::undo))
         .route("/api/history/redo", post(routes::history::redo))
         // Public feed serving

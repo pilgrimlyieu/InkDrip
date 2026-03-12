@@ -1174,6 +1174,34 @@ impl BookStore for SqliteStore {
             .map_err(|e| InkDripError::StorageError(e.to_string()))?;
         Ok(entries)
     }
+
+    async fn clear_history(&self) -> Result<()> {
+        let conn = self.conn.lock().await;
+        let tx = conn
+            .unchecked_transaction()
+            .map_err(|e| InkDripError::StorageError(e.to_string()))?;
+
+        // Hard-delete soft-deleted feeds first (before books, to avoid FK cascade
+        // from books removing feeds that we explicitly want to clean up here).
+        tx.execute("DELETE FROM feeds WHERE deleted_at IS NOT NULL", [])
+            .map_err(|e| InkDripError::StorageError(format!("clear_history: feeds: {e}")))?;
+
+        // Hard-delete soft-deleted books (cascade removes their segments).
+        tx.execute("DELETE FROM books WHERE deleted_at IS NOT NULL", [])
+            .map_err(|e| InkDripError::StorageError(format!("clear_history: books: {e}")))?;
+
+        // Wipe the undo log and reset the cursor.
+        tx.execute("DELETE FROM undo_log", [])
+            .map_err(|e| InkDripError::StorageError(format!("clear_history: undo_log: {e}")))?;
+
+        tx.execute("UPDATE undo_cursor SET current_id = 0 WHERE id = 1", [])
+            .map_err(|e| InkDripError::StorageError(format!("clear_history: cursor: {e}")))?;
+
+        tx.commit()
+            .map_err(|e| InkDripError::StorageError(format!("clear_history: commit: {e}")))?;
+
+        Ok(())
+    }
 }
 
 // ─── Helper functions ───────────────────────────────────────────

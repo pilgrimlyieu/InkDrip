@@ -1,6 +1,7 @@
 use axum::Json;
 use axum::extract::{Query, State};
-use axum::http::HeaderMap;
+use axum::http::{HeaderMap, StatusCode};
+use axum::response::IntoResponse;
 use serde::Deserialize;
 use serde_json::Value;
 use tracing::warn;
@@ -13,6 +14,21 @@ use crate::error::{ApiError, ApiResult};
 use crate::state::AppState;
 
 use super::check_auth;
+
+/// DELETE /api/history — Clear all undo/redo history and purge soft-deleted resources.
+///
+/// Hard-deletes every soft-deleted book and feed (which only exist as undo/redo
+/// targets), wipes the undo log, and resets the cursor to zero.  Active books
+/// and feeds are left untouched.
+pub async fn clear_history(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> ApiResult<impl IntoResponse> {
+    check_auth(&state, &headers)?;
+    state.store.clear_history().await?;
+    tracing::info!("History cleared");
+    Ok((StatusCode::NO_CONTENT, ()))
+}
 
 /// GET /api/history — List recent undo log entries.
 pub async fn list_history(
