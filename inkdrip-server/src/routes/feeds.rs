@@ -246,13 +246,13 @@ pub async fn update_feed(
             new_config.words_per_day = wpd;
         }
         if let Some(dt) = &req.delivery_time {
-            new_config.delivery_time = dt.clone();
+            new_config.delivery_time.clone_from(dt);
         }
         if let Some(sd) = req.skip_days {
             new_config.skip_days = SkipDays::from_bits_truncate(sd);
         }
         if let Some(tz) = &req.timezone {
-            new_config.timezone = tz.clone();
+            new_config.timezone.clone_from(tz);
         }
 
         let now: chrono::DateTime<chrono::FixedOffset> = Utc::now().into();
