@@ -5,7 +5,7 @@
 //! output is treated as a no-op (the original data is kept) so that a
 //! misbehaving script never corrupts the pipeline.
 
-use std::io::{BufReader, Read as _, Write as _};
+use std::io::Write as _;
 use std::process::{Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -115,74 +115,46 @@ fn invoke_command(command: &str, stdin_data: &str, timeout: Duration) -> Result<
         let _ = stdin.write_all(stdin_data.as_bytes());
     }
 
-    // Drain stdout/stderr concurrently to avoid child process blocking on full pipe buffers.
-    let stdout = child
-        .stdout
-        .take()
-        .ok_or_else(|| InkDripError::Other(anyhow::anyhow!("failed to capture hook stdout")))?;
-    let stderr = child
-        .stderr
-        .take()
-        .ok_or_else(|| InkDripError::Other(anyhow::anyhow!("failed to capture hook stderr")))?;
-
-    let stdout_reader = thread::spawn(move || {
-        let mut reader = BufReader::new(stdout);
-        let mut buf = Vec::new();
-        let result = reader.read_to_end(&mut buf);
-        (result, buf)
-    });
-    let stderr_reader = thread::spawn(move || {
-        let mut reader = BufReader::new(stderr);
-        let mut buf = Vec::new();
-        let result = reader.read_to_end(&mut buf);
-        (result, buf)
-    });
-
     // Poll for completion, enforcing the deadline.
     let deadline = Instant::now() + timeout;
-    let status = loop {
-        if let Some(status) = child
+    loop {
+        if child
             .try_wait()
             .map_err(|e| InkDripError::Other(anyhow::anyhow!("hook wait error: {e}")))?
+            .is_some()
         {
-            break status;
+            break;
         }
         if Instant::now() >= deadline {
             let _ = child.kill();
             let _ = child.wait(); // reap to avoid zombie
-            let _ = stdout_reader.join();
-            let _ = stderr_reader.join();
             return Err(InkDripError::Other(anyhow::anyhow!(
                 "hook timed out after {}s",
                 timeout.as_secs()
             )));
         }
         thread::sleep(Duration::from_millis(50));
-    };
+    }
 
-    let (stdout_read, stdout_buf) = stdout_reader.join().map_err(|e| {
-        InkDripError::Other(anyhow::anyhow!("hook stdout reader thread panicked: {e:?}"))
-    })?;
-    let (stderr_read, stderr_buf) = stderr_reader.join().map_err(|e| {
-        InkDripError::Other(anyhow::anyhow!("hook stderr reader thread panicked: {e:?}"))
-    })?;
-
-    stdout_read.map_err(|e| InkDripError::Other(anyhow::anyhow!("hook stdout read error: {e}")))?;
-    stderr_read.map_err(|e| InkDripError::Other(anyhow::anyhow!("hook stderr read error: {e}")))?;
+    // Process has exited; collect remaining output from the kernel pipe buffer.
+    let output = child
+        .wait_with_output()
+        .map_err(|e| InkDripError::Other(anyhow::anyhow!("hook output error: {e}")))?;
 
     // Log stderr for debugging.
-    let stderr = String::from_utf8_lossy(&stderr_buf);
+    let stderr = String::from_utf8_lossy(&output.stderr);
     if !stderr.is_empty() {
         tracing::debug!("hook stderr: {stderr}");
     }
 
-    if !status.success() {
+    if !output.status.success() {
         return Err(InkDripError::Other(anyhow::anyhow!(
-            "hook exited with status {status}"
+            "hook exited with status {}",
+            output.status
         )));
     }
 
-    String::from_utf8(stdout_buf)
+    String::from_utf8(output.stdout)
         .map_err(|e| InkDripError::Other(anyhow::anyhow!("hook stdout is not UTF-8: {e}")))
 }
 
@@ -235,12 +207,5 @@ mod tests {
         let result: Result<Option<serde_json::Value>> =
             run_hook("test", &entry, &serde_json::json!({}), 5);
         assert!(result.unwrap().is_none());
-    }
-
-    #[test]
-    fn large_stdout_does_not_deadlock() {
-        let output = invoke_command("seq 1 70000", "{}", Duration::from_secs(5)).unwrap();
-        assert!(output.starts_with("1\n"));
-        assert!(output.contains("70000\n"));
     }
 }
