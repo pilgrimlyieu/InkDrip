@@ -7,10 +7,12 @@
 
 use std::env;
 use std::fs::{self, File, OpenOptions};
-use std::io::Write as _;
+use std::io::{BufReader, Read as _, Write as _};
+use std::process::{Command, Stdio};
 use std::path::PathBuf;
 use std::process::{Command, Stdio, id};
 use std::sync::atomic::{AtomicU64, Ordering};
+
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -121,6 +123,29 @@ fn invoke_command(command: &str, stdin_data: &str, timeout: Duration) -> Result<
         // Ignore write errors — the child may have already exited.
         let _ = stdin.write_all(stdin_data.as_bytes());
     }
+
+    // Drain stdout/stderr concurrently to avoid child process blocking on full pipe buffers.
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| InkDripError::Other(anyhow::anyhow!("failed to capture hook stdout")))?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| InkDripError::Other(anyhow::anyhow!("failed to capture hook stderr")))?;
+
+    let stdout_reader = thread::spawn(move || {
+        let mut reader = BufReader::new(stdout);
+        let mut buf = Vec::new();
+        let result = reader.read_to_end(&mut buf);
+        (result, buf)
+    });
+    let stderr_reader = thread::spawn(move || {
+        let mut reader = BufReader::new(stderr);
+        let mut buf = Vec::new();
+        let result = reader.read_to_end(&mut buf);
+        (result, buf)
+    });
 
     // Poll for completion, enforcing the deadline.
     let deadline = Instant::now() + timeout;
