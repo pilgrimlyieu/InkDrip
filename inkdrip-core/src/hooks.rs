@@ -150,8 +150,12 @@ fn invoke_command(command: &str, stdin_data: &str, timeout: Duration) -> Result<
         if Instant::now() >= deadline {
             let _ = child.kill();
             let _ = child.wait(); // reap to avoid zombie
-            let _ = stdout_reader.join();
-            let _ = stderr_reader.join();
+            // Do not join reader threads on timeout.
+            //
+            // If the hook spawned descendants that inherited stdout/stderr,
+            // those writers can stay open after the direct child is killed.
+            // In that case read_to_end() never sees EOF and join() would block
+            // forever, defeating the timeout guarantee.
             return Err(InkDripError::Other(anyhow::anyhow!(
                 "hook timed out after {}s",
                 timeout.as_secs()
@@ -242,5 +246,45 @@ mod tests {
         let output = invoke_command("seq 1 70000", "{}", Duration::from_secs(5)).unwrap();
         assert!(output.starts_with("1\n"));
         assert!(output.contains("70000\n"));
+    }
+
+    #[test]
+    fn timeout_does_not_wait_for_inherited_pipe_writers() {
+        let script_path = std::env::temp_dir().join(format!(
+            "inkdrip-timeout-test-{}-{}.sh",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock before unix epoch")
+                .as_nanos()
+        ));
+
+        std::fs::write(
+            &script_path,
+            "#!/bin/sh
+sleep 10 &
+sleep 10
+",
+        )
+        .expect("failed to write timeout test script");
+
+        let started = Instant::now();
+        let result = invoke_command(
+            &format!("sh {}", script_path.display()),
+            "{}",
+            Duration::from_secs(1),
+        );
+        let elapsed = started.elapsed();
+
+        let _ = std::fs::remove_file(&script_path);
+
+        assert!(result.is_err());
+        let err = format!("{}", result.unwrap_err());
+        assert!(err.contains("hook timed out"));
+        assert!(
+            elapsed < Duration::from_secs(4),
+            "timeout path blocked for {:?}",
+            elapsed
+        );
     }
 }
