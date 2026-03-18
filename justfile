@@ -100,10 +100,6 @@ alias r  := run
 @test-verbose *args:
     cargo test --workspace -- --nocapture {{ args }}
 
-# Run end-to-end tests against a real server instance (builds release binaries by default)
-@e2e *args:
-    python3 tests/e2e.py {{ args }}
-
 # -----------------------------------------------------------------------------
 # Utilities
 # -----------------------------------------------------------------------------
