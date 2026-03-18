@@ -2,6 +2,8 @@
 
 **[简体中文](README.zh-CN.md)** | **[English](README.md)**
 
+<a href="https://linux.do" alt="LINUX DO"><img src="https://shorturl.at/ggSqS" /></a>
+
 </div>
 
 # InkDrip
