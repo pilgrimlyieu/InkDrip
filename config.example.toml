@@ -70,7 +70,11 @@ auto_create_feed = true
 scan_interval_secs = 300
 
 [transforms]
-# Append reading progress indicator (e.g. "[42% · 12/28]") to each segment.
+# Show reading time and word count (e.g., "≈ 5 min · ~1,234 words").
+reading_time = true
+# Reading speed in words per minute for time estimation.
+reading_speed = 300
+# Append reading progress indicator (e.g., "[42% · 12/28]") to each segment.
 reading_progress = true
 # Custom CSS to inject into segment HTML content.
 custom_css = ""

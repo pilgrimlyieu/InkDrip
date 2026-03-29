@@ -16,7 +16,7 @@ InkDrip 在每次提供订阅源时对片段应用一系列内容变换，并可
 | ---- | -------------------------- | -------------------------- | -------------------------------------------------------------------- |
 | 1    | `ImageUrlTransform`        | 是                         | 将 `<img src="...">` 重写为 `{base_url}/images/{book_id}/{basename}` |
 | 2    | `StyleTransform`           | 设置 `custom_css` 时       | 在内容前注入 `<style>` 标签                                          |
-| 3    | `NavigationTransform`      | 是                         | 在片段尾部添加上/下一篇导航链接                                      |
+| 3    | `ReadingTimeTransform`     | 设置 `reading_time` 时     | 附加阅读时间和字数（如 "≈ 5 min · ~1,234 words"）                    |
 | 4    | `ReadingProgressTransform` | 设置 `reading_progress` 时 | 附加 `[42% · 12/28]` 进度指示器                                      |
 | 5    | `ExternalCommandTransform` | 启用钩子时                 | 通过 stdin/stdout 委派给外部命令                                     |
 
@@ -24,6 +24,8 @@ InkDrip 在每次提供订阅源时对片段应用一系列内容变换，并可
 
 ```toml
 [transforms]
+reading_time = true
+reading_speed = 300
 reading_progress = true
 custom_css = ""
 ```

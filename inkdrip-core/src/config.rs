@@ -227,13 +227,21 @@ impl Default for WatchConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TransformsConfig {
+    /// Show reading time and word count (e.g., "≈ 5 min · ~1,234 words").
+    pub reading_time: bool,
+    /// Reading speed in words per minute for time estimation.
+    pub reading_speed: u32,
+    /// Show reading progress indicator (e.g., "[42% · 12/28]").
     pub reading_progress: bool,
+    /// Custom CSS to inject into segment HTML.
     pub custom_css: String,
 }
 
 impl Default for TransformsConfig {
     fn default() -> Self {
         Self {
+            reading_time: true,
+            reading_speed: 300,
             reading_progress: true,
             custom_css: String::new(),
         }

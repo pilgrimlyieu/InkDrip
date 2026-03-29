@@ -1,4 +1,3 @@
-use std::fmt::Write as _;
 use std::sync::LazyLock;
 
 use regex::Regex;
@@ -34,6 +33,57 @@ pub trait ContentTransform: Send + Sync {
 
     /// Human-readable name for logging.
     fn name(&self) -> &str;
+}
+
+/// Reading time and word count statistics appended to each segment.
+///
+/// Outputs something like: `≈ 5 min · ~1,234 words`
+pub struct ReadingTimeTransform {
+    /// Reading speed in words per minute.
+    pub words_per_minute: u32,
+}
+
+impl ContentTransform for ReadingTimeTransform {
+    fn name(&self) -> &'static str {
+        "reading_time"
+    }
+
+    fn transform(&self, segment: &mut Segment, _ctx: &TransformContext) -> Result<()> {
+        let minutes = estimate_reading_minutes(segment.word_count, self.words_per_minute);
+        let stats = format!(
+            r#"<p style="text-align:center;color:#888;font-size:0.85em;margin-top:1em">≈ {} min · ~{} words</p>"#,
+            minutes,
+            format_number(segment.word_count),
+        );
+
+        segment.content_html.push_str(&stats);
+        Ok(())
+    }
+}
+
+/// Estimate reading time in minutes, with a minimum of 1 minute.
+fn estimate_reading_minutes(word_count: u32, words_per_minute: u32) -> u32 {
+    if words_per_minute == 0 {
+        return 1;
+    }
+    word_count.div_ceil(words_per_minute).max(1)
+}
+
+/// Format a number with thousand separators (e.g., 12345 -> "12,345").
+#[expect(
+    clippy::integer_division,
+    reason = "estimating capacity, precision loss acceptable"
+)]
+fn format_number(n: u32) -> String {
+    let s = n.to_string();
+    let mut result = String::with_capacity(s.len() + s.len() / 3);
+    for (i, c) in s.chars().enumerate() {
+        if i > 0 && (s.len() - i).is_multiple_of(3) {
+            result.push(',');
+        }
+        result.push(c);
+    }
+    result
 }
 
 /// Reading progress indicator appended to each segment.
@@ -81,48 +131,6 @@ impl ContentTransform for StyleTransform {
 
         let style_tag = format!("<style>{}</style>\n", self.css);
         segment.content_html.insert_str(0, &style_tag);
-        Ok(())
-    }
-}
-
-/// Add navigation links between segments.
-pub struct NavigationTransform;
-
-impl ContentTransform for NavigationTransform {
-    fn name(&self) -> &'static str {
-        "navigation"
-    }
-
-    fn transform(&self, segment: &mut Segment, ctx: &TransformContext) -> Result<()> {
-        let mut nav = String::new();
-        nav.push_str(r#"<p style="text-align:center;font-size:0.85em;margin-top:1em">"#);
-
-        if segment.index > 0 {
-            let prev_url = format!(
-                "{}/feeds/{}/atom.xml#segment-{}",
-                ctx.base_url,
-                ctx.feed_slug,
-                segment.index - 1
-            );
-            write!(nav, r#"<a href="{prev_url}">← prev</a>"#).unwrap_or_default();
-        }
-
-        if segment.index > 0 && segment.index + 1 < ctx.total_segments {
-            nav.push_str(" | ");
-        }
-
-        if segment.index + 1 < ctx.total_segments {
-            let next_url = format!(
-                "{}/feeds/{}/atom.xml#segment-{}",
-                ctx.base_url,
-                ctx.feed_slug,
-                segment.index + 1
-            );
-            write!(nav, r#"<a href="{next_url}">next →</a>"#).unwrap_or_default();
-        }
-
-        nav.push_str("</p>");
-        segment.content_html.push_str(&nav);
         Ok(())
     }
 }
@@ -237,8 +245,11 @@ pub fn build_pipeline(
         }));
     }
 
-    // Navigation is always enabled (lightweight)
-    transforms.push(Box::new(NavigationTransform));
+    if config.reading_time {
+        transforms.push(Box::new(ReadingTimeTransform {
+            words_per_minute: config.reading_speed,
+        }));
+    }
 
     if config.reading_progress {
         transforms.push(Box::new(ReadingProgressTransform));
@@ -270,4 +281,36 @@ pub fn apply_transforms(
         transform.transform(segment, ctx)?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn format_number_basic() {
+        assert_eq!(format_number(0), "0");
+        assert_eq!(format_number(1), "1");
+        assert_eq!(format_number(12), "12");
+        assert_eq!(format_number(123), "123");
+        assert_eq!(format_number(1234), "1,234");
+        assert_eq!(format_number(12345), "12,345");
+        assert_eq!(format_number(123_456), "123,456");
+        assert_eq!(format_number(1_234_567), "1,234,567");
+        assert_eq!(format_number(42000), "42,000");
+    }
+
+    #[test]
+    fn estimate_reading_minutes_basic() {
+        // 300 words at 300 wpm = 1 min
+        assert_eq!(estimate_reading_minutes(300, 300), 1);
+        // 600 words at 300 wpm = 2 min
+        assert_eq!(estimate_reading_minutes(600, 300), 2);
+        // 450 words at 300 wpm = 2 min (rounds up)
+        assert_eq!(estimate_reading_minutes(450, 300), 2);
+        // 0 words = 1 min minimum
+        assert_eq!(estimate_reading_minutes(0, 300), 1);
+        // 0 wpm = 1 min (avoid division by zero)
+        assert_eq!(estimate_reading_minutes(1000, 0), 1);
+    }
 }

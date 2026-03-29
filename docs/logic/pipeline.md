@@ -16,7 +16,7 @@ Transforms run in a fixed order on every `serve_feed` request. Each transform re
 | ----- | -------------------------- | --------------------- | ---------------------------------------------------------------------- |
 | 1     | `ImageUrlTransform`        | Yes                   | Rewrites `<img src="...">` to `{base_url}/images/{book_id}/{basename}` |
 | 2     | `StyleTransform`           | If `custom_css` set   | Prepends `<style>` tag with user CSS                                   |
-| 3     | `NavigationTransform`      | Yes                   | Appends prev/next links between segments                               |
+| 3     | `ReadingTimeTransform`     | If `reading_time`     | Appends reading time and word count (e.g., "≈ 5 min · ~1,234 words")   |
 | 4     | `ReadingProgressTransform` | If `reading_progress` | Appends `[42% · 12/28]` progress indicator                             |
 | 5     | `ExternalCommandTransform` | If hooks enabled      | Delegates to external command via stdin/stdout                         |
 
@@ -24,6 +24,8 @@ Transforms run in a fixed order on every `serve_feed` request. Each transform re
 
 ```toml
 [transforms]
+reading_time = true
+reading_speed = 300
 reading_progress = true
 custom_css = ""
 ```
