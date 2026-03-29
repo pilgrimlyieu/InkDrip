@@ -1,13 +1,19 @@
 use chrono::{Datelike, Duration, TimeZone};
 
 use crate::config::{parse_delivery_time, parse_timezone_offset};
-use crate::model::{ScheduleConfig, Segment, SegmentRelease, SkipDays};
+use crate::model::{BudgetMode, ScheduleConfig, Segment, SegmentRelease, SkipDays};
 
 /// Compute release timestamps for all segments in a feed.
 ///
 /// The algorithm distributes segments across days based on `words_per_day`.
 /// Each day's budget is `words_per_day`; segments are assigned to the earliest
 /// day that still has remaining budget.
+///
+/// The `budget_mode` field in config controls how strictly the budget is enforced:
+/// - `Strict`: Never exceed `words_per_day`; a segment is pushed to the next day
+///   if adding it would exceed the budget.
+/// - `Flexible`: Allow a segment if it brings the daily total closer to the budget,
+///   even if it slightly overshoots (mirroring the splitter's "closer-to-target" logic).
 ///
 /// When multiple segments fall on the same day, a small per-second stagger is
 /// applied so that segment reading order is preserved across all RSS readers
@@ -25,15 +31,26 @@ pub fn compute_release_schedule(
 
     let mut releases = Vec::with_capacity(segments.len());
     let mut current_date = config.start_at.with_timezone(&tz).date_naive();
-    let mut daily_remaining = i64::from(config.words_per_day);
+    let budget = config.words_per_day;
+    let mut daily_used: u32 = 0;
 
     for segment in segments {
-        let word_count = i64::from(segment.word_count);
+        let word_count = segment.word_count;
 
-        // If this segment doesn't fit in current day's budget, advance to next day
-        if daily_remaining < word_count && daily_remaining < i64::from(config.words_per_day) {
+        // Determine if we should advance to the next day.
+        // - In Strict mode: advance if adding this segment would exceed the budget
+        //   (unless nothing has been scheduled today, which forces this segment in).
+        // - In Flexible mode: advance if adding this segment would move us further
+        //   from the budget target (using the "closer-to-target" heuristic).
+        let should_advance = daily_used > 0
+            && match config.budget_mode {
+                BudgetMode::Strict => daily_used.saturating_add(word_count) > budget,
+                BudgetMode::Flexible => !is_closer_to_budget(daily_used, word_count, budget),
+            };
+
+        if should_advance {
             current_date = advance_date(current_date, config.skip_days);
-            daily_remaining = i64::from(config.words_per_day);
+            daily_used = 0;
         }
 
         // Assign release time
@@ -55,7 +72,7 @@ pub fn compute_release_schedule(
             release_at,
         });
 
-        daily_remaining -= word_count;
+        daily_used = daily_used.saturating_add(word_count);
     }
 
     // Stagger same-day releases so reading order is deterministic.
@@ -65,6 +82,17 @@ pub fn compute_release_schedule(
     stagger_same_day_releases(&mut releases);
 
     releases
+}
+
+/// Check whether adding `unit_words` to a buffer of `current_words` gets
+/// strictly closer to `target` than stopping now.
+///
+/// Returns `true` when `|current + unit - target| < |current - target|`,
+/// i.e., the combined total is at least as close to the target as the current
+/// total alone. This allows controlled overshoot when the overshoot would be
+/// smaller than the current undershoot.
+fn is_closer_to_budget(current_words: u32, unit_words: u32, target: u32) -> bool {
+    unit_words < target.saturating_sub(current_words).saturating_mul(2)
 }
 
 /// Add per-second offsets to releases that share the same base timestamp.
@@ -122,7 +150,7 @@ pub fn estimate_days(total_words: u32, words_per_day: u32) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::{Segment, SkipDays};
+    use crate::model::{BudgetMode, Segment, SkipDays};
 
     fn make_segments(word_counts: &[u32]) -> Vec<Segment> {
         let mut cumulative = 0u32;
@@ -143,19 +171,24 @@ mod tests {
             .collect()
     }
 
-    #[test]
-    fn basic_schedule() {
-        let segments = make_segments(&[1000, 1000, 1000, 1000]);
-        let config = ScheduleConfig {
+    fn make_config(words_per_day: u32, budget_mode: BudgetMode) -> ScheduleConfig {
+        ScheduleConfig {
             start_at: chrono::FixedOffset::east_opt(8 * 3600)
                 .unwrap()
                 .with_ymd_and_hms(2025, 9, 1, 8, 0, 0)
                 .unwrap(),
-            words_per_day: 2000,
+            words_per_day,
             delivery_time: "08:00".to_owned(),
             skip_days: SkipDays::empty(),
             timezone: "UTC+8".to_owned(),
-        };
+            budget_mode,
+        }
+    }
+
+    #[test]
+    fn basic_schedule_strict() {
+        let segments = make_segments(&[1000, 1000, 1000, 1000]);
+        let config = make_config(2000, BudgetMode::Strict);
 
         let releases = compute_release_schedule(&segments, &config, "feed-1");
         assert_eq!(releases.len(), 4);
@@ -180,6 +213,58 @@ mod tests {
     }
 
     #[test]
+    fn strict_mode_does_not_exceed_budget() {
+        // Two segments that together slightly exceed the budget.
+        // Strict mode should split them across two days.
+        let segments = make_segments(&[1550, 1480]); // sum = 3030 > 3000
+        let config = make_config(3000, BudgetMode::Strict);
+
+        let releases = compute_release_schedule(&segments, &config, "feed-1");
+        assert_eq!(releases.len(), 2);
+
+        // They should be on different days
+        assert_ne!(
+            releases[0].release_at.date_naive(),
+            releases[1].release_at.date_naive()
+        );
+    }
+
+    #[test]
+    fn flexible_mode_allows_closer_overshoot() {
+        // Two segments that together slightly exceed the budget.
+        // Flexible mode should group them because 3030 is closer to 3000 than 1550.
+        let segments = make_segments(&[1550, 1480]); // sum = 3030 > 3000
+        let config = make_config(3000, BudgetMode::Flexible);
+
+        let releases = compute_release_schedule(&segments, &config, "feed-1");
+        assert_eq!(releases.len(), 2);
+
+        // They should be on the SAME day (flexible allows overshoot closer to target)
+        assert_eq!(
+            releases[0].release_at.date_naive(),
+            releases[1].release_at.date_naive()
+        );
+    }
+
+    #[test]
+    fn flexible_mode_does_not_add_when_further() {
+        // First segment uses most of budget; second would move us much further away.
+        // 2800 + 1200 = 4000, which is further from 3000 than 2800 alone.
+        // (distance from 2800 to 3000 is 200, distance from 4000 to 3000 is 1000)
+        let segments = make_segments(&[2800, 1200]);
+        let config = make_config(3000, BudgetMode::Flexible);
+
+        let releases = compute_release_schedule(&segments, &config, "feed-1");
+        assert_eq!(releases.len(), 2);
+
+        // They should be on DIFFERENT days (1200 > 2*(3000-2800) = 400)
+        assert_ne!(
+            releases[0].release_at.date_naive(),
+            releases[1].release_at.date_naive()
+        );
+    }
+
+    #[test]
     fn skip_weekends() {
         // Start on a Friday
         let segments = make_segments(&[3000, 3000, 3000]);
@@ -192,6 +277,7 @@ mod tests {
             delivery_time: "08:00".to_owned(),
             skip_days: SkipDays::WEEKENDS,
             timezone: "UTC".to_owned(),
+            budget_mode: BudgetMode::Strict,
         };
 
         let releases = compute_release_schedule(&segments, &config, "feed-1");

@@ -12,6 +12,7 @@ alias cl := clean
 alias l  := lint
 alias f  := format
 alias c  := check
+alias ca := check-all
 alias fi := fix
 alias t  := test
 alias ta := test-all

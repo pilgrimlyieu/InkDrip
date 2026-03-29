@@ -266,6 +266,7 @@ pub fn print_feed_status(resp: &Value) {
             println!("  Words/day:   {}", u64_val(config, "words_per_day"));
             println!("  Delivery:    {}", str_val(config, "delivery_time"));
             println!("  Timezone:    {}", str_val(config, "timezone"));
+            println!("  Budget mode: {}", str_val(config, "budget_mode"));
         }
     }
 

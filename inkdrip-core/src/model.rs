@@ -1,4 +1,4 @@
-use std::fmt;
+use std::fmt::{self, Display};
 use std::str::FromStr;
 
 use bitflags::bitflags;
@@ -53,7 +53,7 @@ impl Default for SkipDays {
     }
 }
 
-impl fmt::Display for SkipDays {
+impl Display for SkipDays {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if self.is_empty() {
             return f.write_str("none");
@@ -114,7 +114,7 @@ impl BookFormat {
     }
 }
 
-impl fmt::Display for BookFormat {
+impl Display for BookFormat {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(self.as_str())
     }
@@ -232,6 +232,51 @@ impl Segment {
 
 // ─── Feed ───────────────────────────────────────────────────────
 
+/// Budget enforcement mode for scheduling.
+///
+/// - `Strict`: Never exceed `words_per_day`; a segment is pushed to the next
+///   day if it would cause the daily total to exceed the budget.
+/// - `Flexible`: Allow a segment to be added if it brings the daily total
+///   *closer* to `words_per_day`, even if it slightly overshoots. This mirrors
+///   the "closer-to-target" logic used by the splitter and typically produces
+///   daily totals with less variance from the budget.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum BudgetMode {
+    /// Never exceed `words_per_day` (default).
+    #[default]
+    Strict,
+    /// Allow controlled overshoot when closer to the target.
+    Flexible,
+}
+
+impl BudgetMode {
+    #[must_use]
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Strict => "strict",
+            Self::Flexible => "flexible",
+        }
+    }
+}
+
+impl Display for BudgetMode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl FromStr for BudgetMode {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "strict" => Ok(Self::Strict),
+            "flexible" => Ok(Self::Flexible),
+            _ => Err(format!("Unknown budget mode: {s}")),
+        }
+    }
+}
+
 /// Feed status.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -252,7 +297,7 @@ impl FeedStatus {
     }
 }
 
-impl fmt::Display for FeedStatus {
+impl Display for FeedStatus {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(self.as_str())
     }
@@ -283,6 +328,9 @@ pub struct ScheduleConfig {
     pub skip_days: SkipDays,
     /// IANA timezone string.
     pub timezone: String,
+    /// Budget enforcement mode (strict or flexible).
+    #[serde(default)]
+    pub budget_mode: BudgetMode,
 }
 
 /// A feed subscription for a book.

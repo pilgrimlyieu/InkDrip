@@ -11,7 +11,9 @@ use tokio::fs;
 use inkdrip_core::config::{parse_delivery_time, parse_timezone_offset};
 use inkdrip_core::error::InkDripError;
 use inkdrip_core::feed::{self, FeedFormat};
-use inkdrip_core::model::{Feed, FeedStatus, ScheduleConfig, Segment, SegmentRelease, SkipDays};
+use inkdrip_core::model::{
+    BudgetMode, Feed, FeedStatus, ScheduleConfig, Segment, SegmentRelease, SkipDays,
+};
 use inkdrip_core::pipeline;
 use inkdrip_core::scheduler;
 use inkdrip_core::undo::{FeedSnapshot, HistoryPayload};
@@ -33,6 +35,8 @@ pub struct CreateFeedRequest {
     pub slug: Option<String>,
     /// ISO 8601 datetime string for when to start releasing.
     pub start_at: Option<String>,
+    /// Budget enforcement mode: "strict" or "flexible".
+    pub budget_mode: Option<BudgetMode>,
 }
 
 /// POST /api/books/:id/feeds — Create a feed for a book.
@@ -83,6 +87,7 @@ pub async fn create_feed(
             .skip_days
             .map_or(defaults.skip_days, SkipDays::from_bits_truncate),
         timezone: tz_str,
+        budget_mode: req.budget_mode.unwrap_or(defaults.budget_mode),
     };
 
     let slug = req.slug.unwrap_or_else(|| util::generate_slug(&book.title));
@@ -189,6 +194,8 @@ pub struct UpdateFeedRequest {
     pub skip_days: Option<u8>,
     pub timezone: Option<String>,
     pub slug: Option<String>,
+    /// Budget enforcement mode: "strict" or "flexible".
+    pub budget_mode: Option<BudgetMode>,
 }
 
 /// PATCH /api/feeds/:id — Update feed configuration.
@@ -238,7 +245,8 @@ pub async fn update_feed(
     let schedule_changed = req.words_per_day.is_some()
         || req.delivery_time.is_some()
         || req.skip_days.is_some()
-        || req.timezone.is_some();
+        || req.timezone.is_some()
+        || req.budget_mode.is_some();
 
     if schedule_changed {
         let mut new_config = feed.schedule_config.clone();
@@ -253,6 +261,9 @@ pub async fn update_feed(
         }
         if let Some(tz) = &req.timezone {
             new_config.timezone.clone_from(tz);
+        }
+        if let Some(bm) = req.budget_mode {
+            new_config.budget_mode = bm;
         }
 
         let now: chrono::DateTime<chrono::FixedOffset> = Utc::now().into();

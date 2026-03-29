@@ -45,6 +45,13 @@ timezone = "Asia/Shanghai"
 #                   "thursday" ("thu"), "friday" ("fri"), "saturday" ("sat"), "sunday" ("sun")
 # Example: skip_days = ["saturday", "sunday"]  — skip weekends
 skip_days = []
+# Budget enforcement mode for scheduling.
+# - "strict": Never exceed words_per_day (default). A segment is pushed to the
+#             next day if adding it would exceed the budget.
+# - "flexible": Allow a segment if it brings the daily total closer to words_per_day,
+#               even if it slightly overshoots. Uses the same "closer-to-target"
+#               heuristic as the splitter.
+budget_mode = "strict"
 
 [parser.txt]
 # Regex pattern for chapter separators.

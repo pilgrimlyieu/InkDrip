@@ -16,22 +16,36 @@ InkDrip's scheduler computes release timestamps for all segments in a feed, dist
 | Delivery time | `defaults.delivery_time` | `"08:00"`         | Fixed daily delivery time (HH:MM)                        |
 | Timezone      | `defaults.timezone`      | `"Asia/Shanghai"` | IANA timezone name or `UTC±N`                            |
 | Skip days     | `defaults.skip_days`     | `[]`              | Days of the week to skip (e.g. `["saturday", "sunday"]`) |
+| Budget mode   | `defaults.budget_mode`   | `"strict"`        | Budget enforcement mode: `"strict"` or `"flexible"`      |
 
 These defaults apply when creating a new feed and are **snapshotted** into the feed's `schedule_config`. Changing config.toml does not affect existing feeds — use `PATCH /api/feeds/:id` or `inkdrip edit feed` to update a live feed.
 
 ## Algorithm
 
 The scheduler uses a **greedy budget allocation** approach:
-1. Initialize `current_date` to the feed's `start_at` date and `daily_remaining` to `words_per_day`.
+1. Initialize `current_date` to the feed's `start_at` date and `daily_used` to 0.
 2. For each segment (in order):
-   - If the segment's `word_count` exceeds `daily_remaining` **and** some budget has already been consumed, advance to the next valid date and reset the budget.
+   - Check whether to advance to the next day based on `budget_mode`:
+     - **Strict mode:** Advance if adding this segment would exceed `words_per_day` (and some content has already been scheduled for today).
+     - **Flexible mode:** Advance if adding this segment would move the daily total *further* from `words_per_day` than the current total. This uses the "closer-to-target" heuristic (same as the splitter), allowing controlled overshoot when it results in a daily total closer to the budget.
    - Assign `release_at = current_date + delivery_time` (in the configured timezone).
-   - Subtract the segment's `word_count` from `daily_remaining`.
+   - Add the segment's `word_count` to `daily_used`.
 3. When advancing dates, skip any day whose weekday appears in `skip_days`.
+
+### Budget Modes
+
+| Mode       | Behavior                                                                                                            |
+| ---------- | ------------------------------------------------------------------------------------------------------------------- |
+| `strict`   | Never exceed `words_per_day`. A segment is pushed to the next day if it would cause the total to exceed the budget. |
+| `flexible` | Allow a segment if it brings the daily total closer to `words_per_day`, even if it slightly overshoots the budget.  |
+
+**Example:** With `words_per_day = 3000` and two segments of 1550 and 1480 words (total 3030):
+- **Strict mode:** Only the first segment (1550) is scheduled for day 1; the second (1480) goes to day 2.
+- **Flexible mode:** Both segments are scheduled for day 1, since 3030 is closer to 3000 than 1550 alone.
 
 ### Key Behaviors
 
-- **Multiple segments per day:** A day can hold multiple segments as long as the cumulative word count stays within the budget. This means short segments naturally cluster.
+- **Multiple segments per day:** A day can hold multiple segments as long as the budget mode allows. Short segments naturally cluster together.
 - **Same-day ordering (stagger):** When multiple segments land on the same day, they receive a small sub-second offset so that RSS readers always display them in reading order. Within a batch of N segments, segment k gets an offset of `(N-1-k)` seconds — the first segment in reading order has the highest timestamp and appears at the top in newest-first readers.
 - **Oversized segments:** A segment larger than `words_per_day` is assigned to a fresh day on its own — it won't be split further at schedule time.
 - **Skip days:** Weekend skipping (or any day combination) is supported. The scheduler advances past all skipped days when looking for the next valid date.
@@ -42,7 +56,7 @@ All segments assigned to the same date share the same `release_at` timestamp —
 
 ## Rescheduling
 
-When a feed's configuration changes (e.g., `words_per_day` or `skip_days` is updated), the scheduler recomputes all future releases. Already-released segments are not moved backward. The implementation:
+When a feed's configuration changes (e.g., `words_per_day`, `skip_days`, or `budget_mode` is updated), the scheduler recomputes all future releases. Already-released segments are not moved backward. The implementation:
 1. Collects all segments for the book.
 2. Recomputes the full schedule with the new config.
 3. Updates only the `release_at` for segments not yet released.
@@ -60,7 +74,7 @@ Feed creation request
   ScheduleConfig {
     start_at, words_per_day,
     delivery_time, timezone,
-    skip_days
+    skip_days, budget_mode
   }
         │
         ▼

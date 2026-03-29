@@ -385,6 +385,7 @@ async fn try_persist_auto_feed(
         delivery_time: defaults.delivery_time.clone(),
         skip_days: defaults.skip_days,
         timezone: defaults.timezone.clone(),
+        budget_mode: defaults.budget_mode,
     };
 
     let feed = Feed::new(book_id.to_owned(), slug.to_owned(), schedule.clone());

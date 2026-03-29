@@ -171,6 +171,7 @@ INKDRIP__WATCH__ENABLED=true
 | `defaults.delivery_time`        | `08:00`                 | Daily release time (HH:MM)                                                     |
 | `defaults.timezone`             | `Asia/Shanghai`         | Timezone for scheduling                                                        |
 | `defaults.skip_days`            | `[]`                    | Days to skip (see below)                                                       |
+| `defaults.budget_mode`          | `strict`                | Budget enforcement: `strict` or `flexible` (see below)                         |
 | `watch.enabled`                 | `false`                 | Auto-import books from a directory                                             |
 | `watch.dir`                     | `./books`               | Directory to watch for new book files                                          |
 | `watch.auto_create_feed`        | `true`                  | Auto-create a feed when a book is detected                                     |
@@ -199,6 +200,19 @@ Example: `skip_days = ["saturday", "sunday"]` to skip weekends.
 
 > **Note:** The JSON API accepts `skip_days` as a `u8` bitfield integer
 > (`MON=1, TUE=2, WED=4, THU=8, FRI=16, SAT=32, SUN=64`).
+
+### Budget Mode
+
+`budget_mode` controls how strictly the daily word budget is enforced during scheduling:
+
+| Mode       | Description                                                                                   |
+| ---------- | --------------------------------------------------------------------------------------------- |
+| `strict`   | Never exceed `words_per_day`. A segment is pushed to the next day if it would exceed budget.  |
+| `flexible` | Allow a segment if it brings the daily total closer to `words_per_day`, even if overshooting. |
+
+Example: With `words_per_day = 3000` and two segments of 1550 and 1480 words:
+- **Strict:** Day 1 gets 1550 words; Day 2 gets 1480 words.
+- **Flexible:** Day 1 gets both (3030 words), since 3030 is closer to 3000 than 1550.
 
 ## API Reference
 

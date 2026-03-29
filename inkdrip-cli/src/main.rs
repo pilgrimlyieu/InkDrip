@@ -134,6 +134,9 @@ enum FeedAction {
         /// Start date (ISO 8601, default: tomorrow)
         #[arg(long)]
         start: Option<String>,
+        /// Budget enforcement mode: "strict" (default) or "flexible"
+        #[arg(long)]
+        budget_mode: Option<String>,
     },
     /// Pause a feed
     Pause {
@@ -195,6 +198,9 @@ enum EditTarget {
         /// Status (active, paused, completed)
         #[arg(long)]
         status: Option<String>,
+        /// Budget enforcement mode: "strict" or "flexible"
+        #[arg(long)]
+        budget_mode: Option<String>,
     },
 }
 
@@ -309,6 +315,7 @@ async fn main() -> Result<()> {
                 slug,
                 skip_days,
                 start,
+                budget_mode,
             } => {
                 let resp = client
                     .create_feed(
@@ -318,6 +325,7 @@ async fn main() -> Result<()> {
                         slug,
                         skip_days,
                         start,
+                        budget_mode,
                     )
                     .await?;
                 print_output(json_mode, &resp, || output::print_feed_created(&resp));
@@ -365,6 +373,7 @@ async fn main() -> Result<()> {
                 skip_days,
                 timezone,
                 status,
+                budget_mode,
             } => {
                 let params = client::UpdateFeedParams {
                     status,
@@ -373,6 +382,7 @@ async fn main() -> Result<()> {
                     skip_days,
                     timezone,
                     slug,
+                    budget_mode,
                 };
                 let resp = client.update_feed(&feed_id, &params).await?;
                 print_output(json_mode, &resp, || {

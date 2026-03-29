@@ -1414,7 +1414,8 @@ mod tests {
     use chrono::{FixedOffset, TimeZone, Utc};
 
     use inkdrip_core::model::{
-        Book, BookFormat, Feed, FeedStatus, ScheduleConfig, Segment, SegmentRelease, SkipDays,
+        Book, BookFormat, BudgetMode, Feed, FeedStatus, ScheduleConfig, Segment, SegmentRelease,
+        SkipDays,
     };
     use inkdrip_core::store::BookStore;
 
@@ -1476,6 +1477,7 @@ mod tests {
                 delivery_time: "08:00".to_owned(),
                 skip_days: SkipDays::empty(),
                 timezone: "UTC+8".to_owned(),
+                budget_mode: BudgetMode::Strict,
             },
             status: FeedStatus::Active,
             created_at: Utc::now().into(),

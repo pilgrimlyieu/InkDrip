@@ -21,6 +21,7 @@ pub struct UpdateFeedParams {
     pub skip_days: Option<u8>,
     pub timezone: Option<String>,
     pub slug: Option<String>,
+    pub budget_mode: Option<String>,
 }
 
 impl ApiClient {
@@ -94,6 +95,10 @@ impl ApiClient {
         Ok(val.as_array().cloned().unwrap_or_default())
     }
 
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "This is a simple mapping to the API parameters, and having them as separate arguments is more ergonomic for the caller."
+    )]
     pub async fn create_feed(
         &self,
         book_id: &str,
@@ -102,6 +107,7 @@ impl ApiClient {
         slug: Option<String>,
         skip_days: Option<u8>,
         start_at: Option<String>,
+        budget_mode: Option<String>,
     ) -> Result<Value> {
         let mut obj = serde_json::Map::new();
         if let Some(w) = words_per_day {
@@ -118,6 +124,9 @@ impl ApiClient {
         }
         if let Some(s) = start_at {
             obj.insert("start_at".to_owned(), serde_json::json!(s));
+        }
+        if let Some(b) = budget_mode {
+            obj.insert("budget_mode".to_owned(), serde_json::json!(b));
         }
         let body = serde_json::Value::Object(obj);
 
@@ -190,6 +199,9 @@ impl ApiClient {
         }
         if let Some(s) = &params.slug {
             obj.insert("slug".to_owned(), serde_json::json!(s));
+        }
+        if let Some(b) = &params.budget_mode {
+            obj.insert("budget_mode".to_owned(), serde_json::json!(b));
         }
         let body = serde_json::Value::Object(obj);
 

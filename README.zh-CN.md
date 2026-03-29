@@ -168,6 +168,7 @@ INKDRIP__WATCH__ENABLED=true
 | `defaults.delivery_time`        | `08:00`                 | 每日发布时间（HH:MM）                                      |
 | `defaults.timezone`             | `Asia/Shanghai`         | 排程使用的时区                                             |
 | `defaults.skip_days`            | `[]`                    | 跳过的日期（见下方）                                       |
+| `defaults.budget_mode`          | `strict`                | 预算执行模式：`strict` 或 `flexible`（见下方）             |
 | `watch.enabled`                 | `false`                 | 是否自动导入目录中的书籍                                   |
 | `watch.dir`                     | `./books`               | 监控的书籍目录                                             |
 | `watch.auto_create_feed`        | `true`                  | 检测到新书时自动创建订阅                                   |
@@ -196,6 +197,19 @@ INKDRIP__WATCH__ENABLED=true
 
 > **注意：** JSON API 中的 `skip_days` 接受 `u8` 位域整数
 > （`MON=1, TUE=2, WED=4, THU=8, FRI=16, SAT=32, SUN=64`）。
+
+### 预算模式
+
+`budget_mode` 控制调度时如何执行每日字数预算：
+
+| 模式       | 说明                                                                     |
+| ---------- | ------------------------------------------------------------------------ |
+| `strict`   | 严格不超过 `words_per_day`。若加入片段会超出预算，则推迟到下一天。       |
+| `flexible` | 若加入片段能使当日总字数更接近 `words_per_day`，则允许加入，即使会超出。 |
+
+示例：假设 `words_per_day = 3000`，有两个片段分别为 1550 和 1480 字：
+- **Strict：** 第 1 天投递 1550 字；第 2 天投递 1480 字。
+- **Flexible：** 第 1 天投递两者（共 3030 字），因为 3030 比 1550 更接近 3000。
 
 ## API 参考
 

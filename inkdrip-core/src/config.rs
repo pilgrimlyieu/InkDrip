@@ -4,7 +4,7 @@ use chrono::NaiveTime;
 use serde::de::{self, SeqAccess, Visitor};
 use serde::{Deserialize, Serialize};
 
-use crate::model::SkipDays;
+use crate::model::{BudgetMode, SkipDays};
 
 /// Application-wide configuration.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -88,6 +88,9 @@ pub struct DefaultsConfig {
     /// pipe-separated bitflag string produced by serialization (e.g. `"SAT | SUN"`).
     #[serde(default, deserialize_with = "deserialize_skip_days")]
     pub skip_days: SkipDays,
+    /// Budget enforcement mode (strict or flexible).
+    #[serde(default)]
+    pub budget_mode: BudgetMode,
 }
 
 impl Default for DefaultsConfig {
@@ -100,6 +103,7 @@ impl Default for DefaultsConfig {
             delivery_time: "08:00".into(),
             timezone: "Asia/Shanghai".into(),
             skip_days: SkipDays::empty(),
+            budget_mode: BudgetMode::Strict,
         }
     }
 }
