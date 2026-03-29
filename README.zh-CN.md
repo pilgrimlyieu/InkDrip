@@ -323,9 +323,9 @@ inkdrip-cli/            命令行工具（clap + reqwest）
 
 ## 文档
 
-- [分段算法](./docs/logic/splitting.md) - 详细解释了语义分段策略，如何在保持自然阅读边界的前提下将章节拆分为适合 RSS 投递的片段。
-- [变换管线与钩子系统](./docs/logic/pipeline.md) - 介绍了内容变换管线以及如何使用钩子在关键节点运行自定义处理。
-- [调度算法](./docs/logic/scheduling.md) - 解释了如何根据订阅的排程配置计算片段的发布时间戳。
+- [分段算法](./docs/logic/splitting.zh-CN.md) - 详细解释了语义分段策略，如何在保持自然阅读边界的前提下将章节拆分为适合 RSS 投递的片段。
+- [变换管线与钩子系统](./docs/logic/pipeline.zh-CN.md) - 介绍了内容变换管线以及如何使用钩子在关键节点运行自定义处理。
+- [调度算法](./docs/logic/scheduling.zh-CN.md) - 解释了如何根据订阅的排程配置计算片段的发布时间戳。
 
 ## 许可证
 
