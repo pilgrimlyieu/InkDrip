@@ -602,7 +602,7 @@ impl BookStore for SqliteStore {
                  FROM segment_releases sr
                  JOIN segments s ON sr.segment_id = s.id
                  WHERE sr.feed_id = ?1 AND sr.release_at <= ?2
-                 ORDER BY s.idx ASC
+                 ORDER BY sr.release_at DESC
                  LIMIT ?3",
             )
             .map_err(|e| InkDripError::StorageError(e.to_string()))?;
@@ -1411,7 +1411,7 @@ impl<T> OptionalExt<T> for StdResult<T, rusqlite::Error> {
 
 #[cfg(test)]
 mod tests {
-    use chrono::{FixedOffset, TimeZone, Utc};
+    use chrono::{Duration, FixedOffset, TimeZone, Utc};
 
     use inkdrip_core::model::{
         Book, BookFormat, BudgetMode, Feed, FeedStatus, ScheduleConfig, Segment, SegmentRelease,
@@ -1684,6 +1684,157 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(count, 0);
+    }
+
+    /// When segments exceed the limit, the query must return the MOST RECENT N segments.
+    #[tokio::test]
+    async fn get_released_segments_returns_most_recent_when_over_limit() {
+        let store = setup_store().await;
+        store.save_book(&make_book("book1234")).await.unwrap();
+
+        // Create 10 segments
+        let segments = make_segments("book1234", 10);
+        store.save_segments(&segments).await.unwrap();
+        store
+            .save_feed(&make_feed("feed0001", "book1234"))
+            .await
+            .unwrap();
+
+        // Schedule releases: segment 0 earliest, segment 9 latest
+        let base_time = tz8().with_ymd_and_hms(2026, 1, 1, 8, 0, 0).unwrap();
+        let releases: Vec<SegmentRelease> = segments
+            .iter()
+            .enumerate()
+            .map(|(i, s)| SegmentRelease {
+                segment_id: s.id.clone(),
+                feed_id: "feed0001".to_owned(),
+                // Each segment released 1 day later
+                release_at: base_time + Duration::days(i as i64),
+            })
+            .collect();
+        store.save_releases(&releases).await.unwrap();
+
+        // Query with limit=5, after all are released
+        let query_time = base_time + Duration::days(20);
+        let result = store
+            .get_released_segments("feed0001", query_time, 5)
+            .await
+            .unwrap();
+
+        assert_eq!(result.len(), 5, "should return exactly 5 segments");
+
+        // First element should be the MOST RECENTLY released (segment 9)
+        assert_eq!(
+            result[0].0.index, 9,
+            "first result must be the most recent segment (index 9), not oldest"
+        );
+        assert_eq!(result[4].0.index, 5, "last result must be segment index 5");
+
+        // Verify descending order by release time
+        for i in 0..result.len() - 1 {
+            assert!(
+                result[i].1.release_at >= result[i + 1].1.release_at,
+                "results must be ordered by release_at DESC"
+            );
+        }
+    }
+
+    /// Test that staggered same-day releases maintain correct order.
+    /// When multiple segments release on the same day with stagger offsets,
+    /// ORDER BY `release_at` DESC should still produce correct reading order.
+    #[tokio::test]
+    async fn get_released_segments_respects_stagger_order() {
+        let store = setup_store().await;
+        store.save_book(&make_book("book1234")).await.unwrap();
+
+        let segments = make_segments("book1234", 3);
+        store.save_segments(&segments).await.unwrap();
+        store
+            .save_feed(&make_feed("feed0001", "book1234"))
+            .await
+            .unwrap();
+
+        // Simulate stagger: 3 segments on same day
+        // Stagger gives: seg0 +2s, seg1 +1s, seg2 +0s
+        // So seg0 has the LARGEST timestamp (appears first in DESC order)
+        let base_time = tz8().with_ymd_and_hms(2026, 1, 1, 8, 0, 0).unwrap();
+        let releases = vec![
+            SegmentRelease {
+                segment_id: segments[0].id.clone(),
+                feed_id: "feed0001".to_owned(),
+                release_at: base_time + Duration::seconds(2), // seg0: highest timestamp
+            },
+            SegmentRelease {
+                segment_id: segments[1].id.clone(),
+                feed_id: "feed0001".to_owned(),
+                release_at: base_time + Duration::seconds(1),
+            },
+            SegmentRelease {
+                segment_id: segments[2].id.clone(),
+                feed_id: "feed0001".to_owned(),
+                release_at: base_time, // seg2: lowest timestamp
+            },
+        ];
+        store.save_releases(&releases).await.unwrap();
+
+        let query_time = base_time + Duration::days(1);
+        let result = store
+            .get_released_segments("feed0001", query_time, 10)
+            .await
+            .unwrap();
+
+        assert_eq!(result.len(), 3);
+        // With DESC order: seg0 (highest timestamp) comes first
+        assert_eq!(
+            result[0].0.index, 0,
+            "seg0 should be first (highest timestamp)"
+        );
+        assert_eq!(result[1].0.index, 1, "seg1 should be second");
+        assert_eq!(
+            result[2].0.index, 2,
+            "seg2 should be last (lowest timestamp)"
+        );
+    }
+
+    /// Verify the updated timestamp would be correct for feed generation.
+    /// The first element (after DESC sort) should have the latest `release_at`.
+    #[tokio::test]
+    async fn get_released_segments_first_has_latest_timestamp() {
+        let store = setup_store().await;
+        store.save_book(&make_book("book1234")).await.unwrap();
+
+        let segments = make_segments("book1234", 5);
+        store.save_segments(&segments).await.unwrap();
+        store
+            .save_feed(&make_feed("feed0001", "book1234"))
+            .await
+            .unwrap();
+
+        let base_time = tz8().with_ymd_and_hms(2026, 1, 1, 8, 0, 0).unwrap();
+        let latest_time = base_time + Duration::days(4);
+        let releases: Vec<SegmentRelease> = segments
+            .iter()
+            .enumerate()
+            .map(|(i, s)| SegmentRelease {
+                segment_id: s.id.clone(),
+                feed_id: "feed0001".to_owned(),
+                release_at: base_time + Duration::days(i as i64),
+            })
+            .collect();
+        store.save_releases(&releases).await.unwrap();
+
+        let query_time = base_time + Duration::days(10);
+        let result = store
+            .get_released_segments("feed0001", query_time, 10)
+            .await
+            .unwrap();
+
+        // For feed generation: .first() should give the latest timestamp for `updated`
+        assert_eq!(
+            result.first().unwrap().1.release_at,
+            latest_time,
+            "first element must have the latest release_at for feed updated field"
+        );
     }
 
     // ─── Feed operations ────────────────────────────────────────

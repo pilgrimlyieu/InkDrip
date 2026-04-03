@@ -298,4 +298,107 @@ mod tests {
         assert_eq!(estimate_days(3000, 3000), 1);
         assert_eq!(estimate_days(0, 3000), 0);
     }
+
+    /// Stagger must give the FIRST segment in reading order
+    /// the LARGEST timestamp within a same-day batch.
+    #[test]
+    fn stagger_gives_first_segment_largest_timestamp() {
+        // 3 small segments that fit in one day
+        let segments = make_segments(&[500, 500, 500]);
+        let config = make_config(3000, BudgetMode::Strict);
+
+        let releases = compute_release_schedule(&segments, &config, "feed-1");
+        assert_eq!(releases.len(), 3);
+
+        // All on same day
+        assert_eq!(
+            releases[0].release_at.date_naive(),
+            releases[1].release_at.date_naive()
+        );
+        assert_eq!(
+            releases[1].release_at.date_naive(),
+            releases[2].release_at.date_naive()
+        );
+
+        // First segment has the LARGEST timestamp
+        assert!(
+            releases[0].release_at > releases[1].release_at,
+            "seg0 must have larger timestamp than seg1"
+        );
+        assert!(
+            releases[1].release_at > releases[2].release_at,
+            "seg1 must have larger timestamp than seg2"
+        );
+
+        // Verify specific offsets: seg0 = +2s, seg1 = +1s, seg2 = +0s
+        let base = releases[2].release_at; // seg2 has base time (no offset)
+        assert_eq!(
+            (releases[0].release_at - base).num_seconds(),
+            2,
+            "seg0 should be 2 seconds after base"
+        );
+        assert_eq!(
+            (releases[1].release_at - base).num_seconds(),
+            1,
+            "seg1 should be 1 second after base"
+        );
+    }
+
+    /// Test that segments on different days don't interfere with each other's stagger.
+    #[test]
+    fn stagger_only_affects_same_day_segments() {
+        // 4 segments: 2 fit on day 1, 2 fit on day 2
+        let segments = make_segments(&[1500, 1400, 1500, 1400]);
+        let config = make_config(3000, BudgetMode::Strict);
+
+        let releases = compute_release_schedule(&segments, &config, "feed-1");
+        assert_eq!(releases.len(), 4);
+
+        // Day 1: seg0, seg1
+        let day1 = releases[0].release_at.date_naive();
+        assert_eq!(releases[1].release_at.date_naive(), day1);
+
+        // Day 2: seg2, seg3
+        let day2 = releases[2].release_at.date_naive();
+        assert_eq!(releases[3].release_at.date_naive(), day2);
+        assert_ne!(day1, day2);
+
+        // Stagger within day 1: seg0 > seg1
+        assert!(releases[0].release_at > releases[1].release_at);
+
+        // Stagger within day 2: seg2 > seg3
+        assert!(releases[2].release_at > releases[3].release_at);
+    }
+
+    /// Sorting by `release_at` DESC should give correct reading order.
+    #[test]
+    fn stagger_produces_correct_order_when_sorted_desc() {
+        use std::collections::HashMap;
+
+        let segments = make_segments(&[500, 500, 500, 500]);
+        let config = make_config(3000, BudgetMode::Strict);
+
+        let releases = compute_release_schedule(&segments, &config, "feed-1");
+
+        // Map segment_id to index for verification
+        let id_to_index: HashMap<String, usize> = segments
+            .iter()
+            .enumerate()
+            .map(|(i, s)| (s.id.clone(), i))
+            .collect();
+
+        // Sort by release_at DESC (what the database does)
+        let mut sorted_releases = releases.clone();
+        sorted_releases.sort_by(|a, b| b.release_at.cmp(&a.release_at));
+
+        // After DESC sort, releases should be in reading order (seg0, seg1, seg2, seg3)
+        // because stagger gave seg0 the largest timestamp
+        for (position, release) in sorted_releases.iter().enumerate() {
+            let segment_index = id_to_index.get(&release.segment_id).unwrap();
+            assert_eq!(
+                *segment_index, position,
+                "After DESC sort, position {position} should contain segment index {position}, but got {segment_index}"
+            );
+        }
+    }
 }

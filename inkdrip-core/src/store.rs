@@ -83,7 +83,8 @@ pub trait BookStore: Send + Sync {
     async fn update_book_segment_count(&self, id: &str, total_segments: u32) -> Result<()>;
 
     /// Get all segments released on or before the given time, for a specific feed.
-    /// Results are ordered by segment index (ascending).
+    /// Results are ordered by release time (descending - most recent first),
+    /// limited to the specified number of segments.
     async fn get_released_segments(
         &self,
         feed_id: &str,

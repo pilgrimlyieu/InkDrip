@@ -110,6 +110,8 @@ timeout_secs = 30
 # Default feed format: "atom" or "rss".
 format = "atom"
 # Maximum number of items returned per feed request.
+# Feeds always show the most recently released N segments to ensure
+# the feed stays up-to-date even when total segments exceed this limit.
 items_limit = 50
 
 # Aggregate feeds combine multiple feeds into a single unified feed.

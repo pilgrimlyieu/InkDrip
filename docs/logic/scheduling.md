@@ -54,6 +54,20 @@ The scheduler uses a **greedy budget allocation** approach:
 
 All segments assigned to the same date share the same `release_at` timestamp — the configured `delivery_time` in the configured `timezone`. RSS readers polling after that time will see the new segments.
 
+## RSS Feed Limits
+
+RSS feeds are limited to the most recent N segments (configurable via `feed.items_limit`, default 50) to keep feed size manageable. Segments are ordered by `release_at` in descending order, ensuring that:
+- The feed always shows the **most recently released** segments
+- The `updated` (Atom) and `lastBuildDate` (RSS) timestamps reflect the latest content
+- RSS readers detect new releases even when total segments exceed the limit
+
+This means:
+- Segments 1-50: All visible in the feed
+- Segment 51 released: Feed shows segments 2-51 (segment 1 drops out)
+- The feed `updated` timestamp advances with each new release
+
+Readers who have already consumed earlier segments will have them cached, so this only affects new subscribers who join after many segments have been released.
+
 ## Rescheduling
 
 When a feed's configuration changes (e.g., `words_per_day`, `skip_days`, or `budget_mode` is updated), the scheduler recomputes all future releases. Already-released segments are not moved backward. The implementation:

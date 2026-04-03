@@ -93,7 +93,7 @@ pub fn generate_atom_feed(
 
     atom_feed.set_updated(
         segments
-            .last()
+            .first()
             .map_or_else(Utc::now, |(_, r)| r.release_at.with_timezone(&Utc)),
     );
 
@@ -135,6 +135,10 @@ pub fn generate_rss_feed(
     channel.set_description(format!(
         "Drip-feed reading of {} by {}",
         book.title, book.author
+    ));
+    channel.set_last_build_date(segments.first().map_or_else(
+        || Utc::now().to_rfc2822(),
+        |(_, r)| r.release_at.to_rfc2822(),
     ));
     channel.set_items(items);
 
@@ -215,7 +219,7 @@ pub fn generate_aggregate_atom(
 
     atom_feed.set_updated(
         segments
-            .last()
+            .first()
             .map_or_else(Utc::now, |(_, r, _)| r.release_at.with_timezone(&Utc)),
     );
 
@@ -257,7 +261,196 @@ pub fn generate_aggregate_rss(
     } else {
         agg.description.clone()
     });
+    channel.set_last_build_date(segments.first().map_or_else(
+        || Utc::now().to_rfc2822(),
+        |(_, r, _)| r.release_at.to_rfc2822(),
+    ));
     channel.set_items(items);
 
     channel.to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use chrono::{Duration, FixedOffset, TimeZone};
+
+    use super::*;
+    use crate::model::{Book, BookFormat, BudgetMode, Feed, FeedStatus, ScheduleConfig, SkipDays};
+
+    fn tz8() -> FixedOffset {
+        FixedOffset::east_opt(8 * 3600).unwrap()
+    }
+
+    fn make_book() -> Book {
+        Book {
+            id: "book1".to_owned(),
+            title: "Test Book".to_owned(),
+            author: "Author".to_owned(),
+            format: BookFormat::Markdown,
+            file_hash: "hash".to_owned(),
+            file_path: "/test.md".to_owned(),
+            total_words: 10000,
+            total_segments: 5,
+            created_at: Utc::now().into(),
+        }
+    }
+
+    fn make_feed() -> Feed {
+        Feed {
+            id: "feed1".to_owned(),
+            book_id: "book1".to_owned(),
+            slug: "test-feed".to_owned(),
+            schedule_config: ScheduleConfig {
+                start_at: tz8().with_ymd_and_hms(2026, 1, 1, 8, 0, 0).unwrap(),
+                words_per_day: 2000,
+                delivery_time: "08:00".to_owned(),
+                skip_days: SkipDays::empty(),
+                timezone: "UTC+8".to_owned(),
+                budget_mode: BudgetMode::Strict,
+            },
+            status: FeedStatus::Active,
+            created_at: Utc::now().into(),
+        }
+    }
+
+    fn make_segment(index: u32) -> Segment {
+        Segment {
+            id: format!("seg{index}"),
+            book_id: "book1".to_owned(),
+            index,
+            title_context: format!("Chapter {}", index + 1),
+            content_html: format!("<p>Content {index}</p>"),
+            word_count: 1000,
+            cumulative_words: (index + 1) * 1000,
+        }
+    }
+
+    /// Atom feed `updated` must use the FIRST segment's `release_at`
+    /// when segments are ordered by `release_at` DESC (most recent first).
+    #[test]
+    fn atom_feed_updated_uses_most_recent_release() {
+        let book = make_book();
+        let feed = make_feed();
+        let base_time = tz8().with_ymd_and_hms(2026, 1, 1, 8, 0, 0).unwrap();
+
+        // Segments ordered by release_at DESC (most recent first)
+        let segments: Vec<(Segment, SegmentRelease)> = vec![
+            (
+                make_segment(2),
+                SegmentRelease {
+                    segment_id: "seg2".to_owned(),
+                    feed_id: "feed1".to_owned(),
+                    release_at: base_time + Duration::days(2), // Most recent
+                },
+            ),
+            (
+                make_segment(1),
+                SegmentRelease {
+                    segment_id: "seg1".to_owned(),
+                    feed_id: "feed1".to_owned(),
+                    release_at: base_time + Duration::days(1),
+                },
+            ),
+            (
+                make_segment(0),
+                SegmentRelease {
+                    segment_id: "seg0".to_owned(),
+                    feed_id: "feed1".to_owned(),
+                    release_at: base_time, // Oldest
+                },
+            ),
+        ];
+
+        let xml = generate_atom_feed(&book, &feed, &segments, "http://example.com");
+
+        // The feed should contain the most recent segment's date in <updated>
+        let expected_date = (base_time + Duration::days(2)).to_rfc3339();
+        assert!(
+            xml.contains(&expected_date),
+            "Atom feed <updated> must contain most recent release time.\nExpected: {expected_date}\nGot XML: {xml}"
+        );
+    }
+
+    /// RSS feed `lastBuildDate` must be the most recent release time.
+    #[test]
+    fn rss_feed_last_build_date_uses_most_recent_release() {
+        let book = make_book();
+        let feed = make_feed();
+        let base_time = tz8().with_ymd_and_hms(2026, 1, 1, 8, 0, 0).unwrap();
+        let most_recent = base_time + Duration::days(2);
+
+        // Segments ordered DESC
+        let segments: Vec<(Segment, SegmentRelease)> = vec![
+            (
+                make_segment(2),
+                SegmentRelease {
+                    segment_id: "seg2".to_owned(),
+                    feed_id: "feed1".to_owned(),
+                    release_at: most_recent,
+                },
+            ),
+            (
+                make_segment(0),
+                SegmentRelease {
+                    segment_id: "seg0".to_owned(),
+                    feed_id: "feed1".to_owned(),
+                    release_at: base_time,
+                },
+            ),
+        ];
+
+        let xml = generate_rss_feed(&book, &feed, &segments, "http://example.com");
+
+        // RSS uses RFC 2822 format
+        let expected_date = most_recent.to_rfc2822();
+        assert!(
+            xml.contains(&expected_date),
+            "RSS <lastBuildDate> must contain most recent release time.\nExpected: {expected_date}\nGot XML: {xml}"
+        );
+        assert!(
+            xml.contains("<lastBuildDate>"),
+            "RSS feed must have <lastBuildDate> element"
+        );
+    }
+
+    /// Test that empty segments list doesn't panic and uses current time.
+    #[test]
+    fn atom_feed_empty_segments_uses_now() {
+        let book = make_book();
+        let feed = make_feed();
+        let segments: Vec<(Segment, SegmentRelease)> = vec![];
+
+        let xml = generate_atom_feed(&book, &feed, &segments, "http://example.com");
+
+        // Should not panic and should contain <updated> with some timestamp
+        assert!(
+            xml.contains("<updated>"),
+            "Atom feed must have <updated> even with no segments"
+        );
+    }
+
+    /// Test that RSS items are generated with correct pubDate from `release_at`.
+    #[test]
+    fn rss_items_have_correct_pub_date() {
+        let book = make_book();
+        let feed = make_feed();
+        let release_time = tz8().with_ymd_and_hms(2026, 3, 15, 8, 0, 0).unwrap();
+
+        let segments: Vec<(Segment, SegmentRelease)> = vec![(
+            make_segment(0),
+            SegmentRelease {
+                segment_id: "seg0".to_owned(),
+                feed_id: "feed1".to_owned(),
+                release_at: release_time,
+            },
+        )];
+
+        let xml = generate_rss_feed(&book, &feed, &segments, "http://example.com");
+
+        let expected_date = release_time.to_rfc2822();
+        assert!(
+            xml.contains(&format!("<pubDate>{expected_date}</pubDate>")),
+            "RSS item must have correct pubDate"
+        );
+    }
 }
