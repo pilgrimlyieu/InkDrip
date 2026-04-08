@@ -6,12 +6,12 @@ pub mod history;
 use axum::extract::State;
 use axum::http::{HeaderMap, header};
 use axum::response::IntoResponse;
-use chrono::{Duration, TimeZone, Utc};
+use chrono::{DateTime, Duration, FixedOffset, TimeZone, Utc};
 
 use inkdrip_core::config::{parse_delivery_time, parse_timezone_offset};
 use inkdrip_core::error::InkDripError;
 use inkdrip_core::feed;
-use inkdrip_core::model::ScheduleConfig;
+use inkdrip_core::model::{ScheduleConfig, SegmentRelease};
 
 use crate::error::{ApiError, ApiResult};
 use crate::state::AppState;
@@ -70,6 +70,23 @@ pub fn compute_next_delivery(config: &ScheduleConfig) -> chrono::DateTime<chrono
             .unwrap_or_else(|| Utc::now().into())
             .fixed_offset()
     }
+}
+
+/// Replace future releases (`release_at` > `now`) for a feed in one operation.
+pub async fn replace_future_releases(
+    state: &AppState,
+    feed_id: &str,
+    now: DateTime<FixedOffset>,
+    future_releases: &[SegmentRelease],
+) -> ApiResult<()> {
+    state
+        .store
+        .delete_future_releases_for_feed(feed_id, now)
+        .await?;
+    if !future_releases.is_empty() {
+        state.store.save_releases(future_releases).await?;
+    }
+    Ok(())
 }
 
 /// Truncate HTML content to approximately `max_chars` characters of plain text.

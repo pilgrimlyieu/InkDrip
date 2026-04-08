@@ -125,10 +125,12 @@ Defined in configuration but not yet wired into the serving path. Intended for n
 flowchart LR
     Active -->|all segments released| Completed
     Active -->|manual pause| Paused
+    Paused -->|manual resume| Active
     Completed --> Terminal((Terminal State))
 ```
 
 On each `serve_feed` request, if the feed is `Active` and all segments have been released (i.e., `total_released >= book.total_segments`), the status is automatically transitioned to `Completed`.
+When a feed is paused, unreleased entries are removed from the timeline so no new items appear while paused. Resuming rebuilds future releases from the next delivery slot using the current schedule settings.
 
 ## Aggregate Feeds
 

@@ -125,11 +125,13 @@ command = "python3 /opt/inkdrip/hooks/transform.py"
 flowchart LR
     Active -->|全部片段已发布| Completed
     Active -->|手动暂停| Paused
+    Paused -->|手动恢复| Active
     Completed --> Terminal((终态))
 ```
 
 
 每次 `serve_feed` 请求时，若订阅源状态为 `Active` 且所有片段已发布（即 `total_released >= book.total_segments`），状态自动转为 `Completed`。
+订阅源暂停时，会移除所有未发布条目，因此暂停期间不会出现新的更新；恢复后会基于当前排期配置，从下一个投递时间重新生成未来发布时间。
 
 ## 聚合订阅源
 

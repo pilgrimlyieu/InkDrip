@@ -20,7 +20,9 @@ use inkdrip_core::undo::{FeedSnapshot, HistoryPayload};
 use inkdrip_core::util;
 
 use super::history::push_history;
-use super::{check_auth, check_public_auth, compute_next_delivery, truncate_html};
+use super::{
+    check_auth, check_public_auth, compute_next_delivery, replace_future_releases, truncate_html,
+};
 use crate::error::{ApiError, ApiResult};
 use crate::state::AppState;
 
@@ -91,12 +93,7 @@ pub async fn create_feed(
     };
 
     let slug = req.slug.unwrap_or_else(|| util::generate_slug(&book.title));
-
-    if state.store.get_feed_by_slug(&slug).await?.is_some() {
-        return Err(ApiError(InkDripError::ConfigError(format!(
-            "Feed slug '{slug}' already exists"
-        ))));
-    }
+    ensure_feed_slug_available(&state, &slug).await?;
 
     let feed = Feed::new(book_id.clone(), slug, schedule_config.clone());
 
@@ -186,6 +183,38 @@ pub async fn get_feed(
     })))
 }
 
+/// Rebuild all unreleased segment timestamps from the next delivery slot.
+///
+/// This keeps already released segments untouched while rescheduling only
+/// future entries from "now".
+async fn rebuild_future_releases(
+    state: &AppState,
+    feed_id: &str,
+    book_id: &str,
+    schedule_config: &ScheduleConfig,
+    now: DateTime<FixedOffset>,
+) -> ApiResult<()> {
+    let released_count = state.store.count_released_segments(feed_id, now).await?;
+
+    let all_segments = state.store.get_segments(book_id).await?;
+    let unreleased: Vec<Segment> = all_segments
+        .into_iter()
+        .filter(|segment| segment.index >= released_count)
+        .collect();
+
+    let releases = if unreleased.is_empty() {
+        Vec::new()
+    } else {
+        let mut next_config = schedule_config.clone();
+        next_config.start_at = compute_next_delivery(schedule_config);
+        scheduler::compute_release_schedule(&unreleased, &next_config, feed_id)
+    };
+
+    replace_future_releases(state, feed_id, now, &releases).await?;
+
+    Ok(())
+}
+
 #[derive(Debug, Deserialize)]
 pub struct UpdateFeedRequest {
     pub status: Option<String>,
@@ -196,6 +225,119 @@ pub struct UpdateFeedRequest {
     pub slug: Option<String>,
     /// Budget enforcement mode: "strict" or "flexible".
     pub budget_mode: Option<BudgetMode>,
+}
+
+async fn ensure_feed_slug_available(state: &AppState, slug: &str) -> ApiResult<()> {
+    if state.store.get_feed_by_slug(slug).await?.is_some() {
+        return Err(ApiError(InkDripError::ConfigError(format!(
+            "Feed slug '{slug}' already exists"
+        ))));
+    }
+    Ok(())
+}
+
+fn parse_requested_status(status: Option<&str>) -> ApiResult<Option<FeedStatus>> {
+    status
+        .map(|status_str| {
+            status_str
+                .parse()
+                .map_err(|e: String| ApiError(InkDripError::ConfigError(e)))
+        })
+        .transpose()
+}
+
+async fn update_slug_if_needed(
+    state: &AppState,
+    feed_id: &str,
+    current_slug: &str,
+    requested_slug: Option<&str>,
+) -> ApiResult<()> {
+    if let Some(slug) = requested_slug
+        && slug != current_slug
+    {
+        ensure_feed_slug_available(state, slug).await?;
+        state.store.update_feed_slug(feed_id, slug).await?;
+    }
+    Ok(())
+}
+
+fn has_schedule_changes(req: &UpdateFeedRequest) -> bool {
+    req.words_per_day.is_some()
+        || req.delivery_time.is_some()
+        || req.skip_days.is_some()
+        || req.timezone.is_some()
+        || req.budget_mode.is_some()
+}
+
+fn build_updated_schedule(
+    original_schedule: &ScheduleConfig,
+    req: &UpdateFeedRequest,
+) -> ScheduleConfig {
+    let mut schedule = original_schedule.clone();
+    if let Some(words_per_day) = req.words_per_day {
+        schedule.words_per_day = words_per_day;
+    }
+    if let Some(delivery_time) = &req.delivery_time {
+        schedule.delivery_time.clone_from(delivery_time);
+    }
+    if let Some(skip_days) = req.skip_days {
+        schedule.skip_days = SkipDays::from_bits_truncate(skip_days);
+    }
+    if let Some(timezone) = &req.timezone {
+        schedule.timezone.clone_from(timezone);
+    }
+    if let Some(budget_mode) = req.budget_mode {
+        schedule.budget_mode = budget_mode;
+    }
+    schedule
+}
+
+async fn apply_status_change(
+    state: &AppState,
+    feed: &Feed,
+    requested_status: Option<FeedStatus>,
+    schedule_changed: bool,
+    now: DateTime<FixedOffset>,
+) -> ApiResult<FeedStatus> {
+    let mut effective_status = feed.status;
+    if let Some(new_status) = requested_status.filter(|status| *status != feed.status) {
+        state.store.update_feed_status(&feed.id, new_status).await?;
+        effective_status = new_status;
+
+        if new_status == FeedStatus::Paused {
+            replace_future_releases(state, &feed.id, now, &[]).await?;
+        } else if new_status == FeedStatus::Active
+            && feed.status == FeedStatus::Paused
+            && !schedule_changed
+        {
+            rebuild_future_releases(state, &feed.id, &feed.book_id, &feed.schedule_config, now)
+                .await?;
+        }
+    }
+
+    Ok(effective_status)
+}
+
+async fn apply_schedule_change(
+    state: &AppState,
+    feed_id: &str,
+    book_id: &str,
+    schedule_config: &ScheduleConfig,
+    effective_status: FeedStatus,
+    now: DateTime<FixedOffset>,
+) -> ApiResult<()> {
+    state
+        .store
+        .update_feed_schedule(feed_id, schedule_config)
+        .await?;
+
+    if effective_status == FeedStatus::Paused {
+        replace_future_releases(state, feed_id, now, &[]).await?;
+    } else {
+        rebuild_future_releases(state, feed_id, book_id, schedule_config, now).await?;
+    }
+
+    Ok(())
 }
 
 /// PATCH /api/feeds/:id — Update feed configuration.
@@ -223,70 +365,26 @@ pub async fn update_feed(
         slug: feed.slug.clone(),
     };
     let old_releases = state.store.get_releases_for_feed(&id).await?;
+    let now: chrono::DateTime<chrono::FixedOffset> = Utc::now().into();
 
-    if let Some(status_str) = &req.status {
-        let status: FeedStatus = status_str
-            .parse()
-            .map_err(|e: String| ApiError(InkDripError::ConfigError(e)))?;
-        state.store.update_feed_status(&id, status).await?;
-    }
+    let requested_status = parse_requested_status(req.status.as_deref())?;
+    update_slug_if_needed(&state, &id, &feed.slug, req.slug.as_deref()).await?;
 
-    if let Some(slug) = &req.slug
-        && slug != &feed.slug
-    {
-        if state.store.get_feed_by_slug(slug).await?.is_some() {
-            return Err(ApiError(InkDripError::ConfigError(format!(
-                "Feed slug '{slug}' already exists"
-            ))));
-        }
-        state.store.update_feed_slug(&id, slug).await?;
-    }
-
-    let schedule_changed = req.words_per_day.is_some()
-        || req.delivery_time.is_some()
-        || req.skip_days.is_some()
-        || req.timezone.is_some()
-        || req.budget_mode.is_some();
+    let schedule_changed = has_schedule_changes(&req);
+    let effective_status =
+        apply_status_change(&state, &feed, requested_status, schedule_changed, now).await?;
 
     if schedule_changed {
-        let mut new_config = feed.schedule_config.clone();
-        if let Some(wpd) = req.words_per_day {
-            new_config.words_per_day = wpd;
-        }
-        if let Some(dt) = &req.delivery_time {
-            new_config.delivery_time.clone_from(dt);
-        }
-        if let Some(sd) = req.skip_days {
-            new_config.skip_days = SkipDays::from_bits_truncate(sd);
-        }
-        if let Some(tz) = &req.timezone {
-            new_config.timezone.clone_from(tz);
-        }
-        if let Some(bm) = req.budget_mode {
-            new_config.budget_mode = bm;
-        }
-
-        let now: chrono::DateTime<chrono::FixedOffset> = Utc::now().into();
-        let released_count = state.store.count_released_segments(&id, now).await?;
-
-        state
-            .store
-            .delete_future_releases_for_feed(&id, now)
-            .await?;
-
-        let all_segments = state.store.get_segments(&feed.book_id).await?;
-        let unreleased: Vec<Segment> = all_segments
-            .into_iter()
-            .filter(|s| s.index >= released_count)
-            .collect();
-
-        if !unreleased.is_empty() {
-            new_config.start_at = compute_next_delivery(&new_config);
-            let releases = scheduler::compute_release_schedule(&unreleased, &new_config, &id);
-            state.store.save_releases(&releases).await?;
-        }
-
-        state.store.update_feed_schedule(&id, &new_config).await?;
+        let new_config = build_updated_schedule(&feed.schedule_config, &req);
+        apply_schedule_change(
+            &state,
+            &id,
+            &feed.book_id,
+            &new_config,
+            effective_status,
+            now,
+        )
+        .await?;
     }
 
     let updated = state.store.get_feed(&id).await?;
@@ -475,23 +573,7 @@ pub async fn advance_feed(
     // Reschedule all remaining future segments so that tomorrow's delivery
     // slot is filled — advancing today should not create a gap.
     let released_count = state.store.count_released_segments(&id, now).await?;
-    state
-        .store
-        .delete_future_releases_for_feed(&id, now)
-        .await?;
-
-    let all_segments = state.store.get_segments(&feed.book_id).await?;
-    let unreleased: Vec<Segment> = all_segments
-        .into_iter()
-        .filter(|s| s.index >= released_count)
-        .collect();
-
-    if !unreleased.is_empty() {
-        let mut next_config = feed.schedule_config.clone();
-        next_config.start_at = compute_next_delivery(&feed.schedule_config);
-        let releases = scheduler::compute_release_schedule(&unreleased, &next_config, &id);
-        state.store.save_releases(&releases).await?;
-    }
+    rebuild_future_releases(&state, &id, &feed.book_id, &feed.schedule_config, now).await?;
 
     let book = state.store.get_book(&feed.book_id).await?;
     let total_segments = book.map_or(0, |b| b.total_segments);
@@ -638,4 +720,216 @@ pub async fn serve_image(
     };
 
     Ok(([(header::CONTENT_TYPE, content_type)], data))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+    use std::sync::Arc;
+
+    use axum::Json;
+    use axum::extract::{Path as AxumPath, State};
+    use axum::http::HeaderMap;
+    use chrono::{DateTime, Duration, FixedOffset, Utc};
+
+    use inkdrip_core::config::AppConfig;
+    use inkdrip_core::model::{
+        Book, BookFormat, BudgetMode, Feed, FeedStatus, ScheduleConfig, Segment, SegmentRelease,
+        SkipDays,
+    };
+    use inkdrip_store_sqlite::SqliteStore;
+
+    use super::{UpdateFeedRequest, update_feed};
+    use crate::state::AppState;
+
+    const BOOK_ID: &str = "book-pause-test";
+    const FEED_ID: &str = "feed-pause-test";
+    const FEED_SLUG: &str = "feed-pause-test-slug";
+    const SEGMENT_COUNT: u32 = 3;
+    const WORDS_PER_SEGMENT: u32 = 1_000;
+    const UNRELEASED_LIMIT: u32 = 10;
+    const DELIVERY_OFFSET_MINUTES: i64 = 10;
+    const TEST_TIMEZONE: &str = "UTC";
+    const TEST_BASE_URL: &str = "http://localhost:8080";
+
+    async fn setup_state() -> AppState {
+        let store = SqliteStore::open(Path::new(":memory:")).unwrap();
+        store.migrate().await.unwrap();
+
+        let mut config = AppConfig::default();
+        config.server.base_url = TEST_BASE_URL.to_owned();
+
+        AppState {
+            config: Arc::new(config),
+            store: Arc::new(store),
+        }
+    }
+
+    fn make_segments(book_id: &str, count: u32) -> Vec<Segment> {
+        let mut cumulative_words = 0;
+        (0..count)
+            .map(|index| {
+                cumulative_words += WORDS_PER_SEGMENT;
+                Segment {
+                    id: format!("segment-{index}"),
+                    book_id: book_id.to_owned(),
+                    index,
+                    title_context: format!("Segment {index}"),
+                    content_html: format!("<p>Segment {index}</p>"),
+                    word_count: WORDS_PER_SEGMENT,
+                    cumulative_words,
+                }
+            })
+            .collect()
+    }
+
+    async fn seed_feed(state: &AppState) -> DateTime<FixedOffset> {
+        let now: DateTime<FixedOffset> = Utc::now().into();
+        let delivery_time = (now + Duration::minutes(DELIVERY_OFFSET_MINUTES))
+            .format("%H:%M")
+            .to_string();
+
+        let book = Book {
+            id: BOOK_ID.to_owned(),
+            title: "Pause Regression".to_owned(),
+            author: "InkDrip".to_owned(),
+            format: BookFormat::Markdown,
+            file_hash: "hash-pause-test".to_owned(),
+            file_path: "/tmp/pause-test.md".to_owned(),
+            total_words: WORDS_PER_SEGMENT * SEGMENT_COUNT,
+            total_segments: SEGMENT_COUNT,
+            created_at: now,
+        };
+
+        let segments = make_segments(BOOK_ID, SEGMENT_COUNT);
+        let schedule_config = ScheduleConfig {
+            start_at: now - Duration::days(1),
+            words_per_day: WORDS_PER_SEGMENT,
+            delivery_time,
+            skip_days: SkipDays::empty(),
+            timezone: TEST_TIMEZONE.to_owned(),
+            budget_mode: BudgetMode::Strict,
+        };
+        let feed = Feed {
+            id: FEED_ID.to_owned(),
+            book_id: BOOK_ID.to_owned(),
+            slug: FEED_SLUG.to_owned(),
+            schedule_config,
+            status: FeedStatus::Active,
+            created_at: now,
+        };
+
+        let releases = vec![
+            SegmentRelease {
+                segment_id: segments[0].id.clone(),
+                feed_id: FEED_ID.to_owned(),
+                release_at: now - Duration::hours(1),
+            },
+            SegmentRelease {
+                segment_id: segments[1].id.clone(),
+                feed_id: FEED_ID.to_owned(),
+                release_at: now + Duration::hours(1),
+            },
+            SegmentRelease {
+                segment_id: segments[2].id.clone(),
+                feed_id: FEED_ID.to_owned(),
+                release_at: now + Duration::hours(2),
+            },
+        ];
+
+        state.store.save_book(&book).await.unwrap();
+        state.store.save_segments(&segments).await.unwrap();
+        state.store.save_feed(&feed).await.unwrap();
+        state.store.save_releases(&releases).await.unwrap();
+
+        now
+    }
+
+    fn status_request(status: FeedStatus) -> UpdateFeedRequest {
+        UpdateFeedRequest {
+            status: Some(status.as_str().to_owned()),
+            words_per_day: None,
+            delivery_time: None,
+            skip_days: None,
+            timezone: None,
+            slug: None,
+            budget_mode: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn pausing_feed_removes_future_releases() {
+        let state = setup_state().await;
+        let seeded_now = seed_feed(&state).await;
+
+        let pause_result = update_feed(
+            State(state.clone()),
+            HeaderMap::new(),
+            AxumPath(FEED_ID.to_owned()),
+            Json(status_request(FeedStatus::Paused)),
+        )
+        .await;
+        assert!(pause_result.is_ok());
+
+        let paused_feed = state.store.get_feed(FEED_ID).await.unwrap().unwrap();
+        assert_eq!(paused_feed.status, FeedStatus::Paused);
+
+        let far_future = seeded_now + Duration::days(30);
+        let released_count = state
+            .store
+            .count_released_segments(FEED_ID, far_future)
+            .await
+            .unwrap();
+        assert_eq!(released_count, 1);
+
+        let upcoming = state
+            .store
+            .get_unreleased_segments_for_feed(FEED_ID, seeded_now, UNRELEASED_LIMIT)
+            .await
+            .unwrap();
+        assert!(upcoming.is_empty());
+    }
+
+    #[tokio::test]
+    async fn resuming_paused_feed_rebuilds_future_releases() {
+        let state = setup_state().await;
+        let _ = seed_feed(&state).await;
+
+        let pause_result = update_feed(
+            State(state.clone()),
+            HeaderMap::new(),
+            AxumPath(FEED_ID.to_owned()),
+            Json(status_request(FeedStatus::Paused)),
+        )
+        .await;
+        assert!(pause_result.is_ok());
+
+        let resume_result = update_feed(
+            State(state.clone()),
+            HeaderMap::new(),
+            AxumPath(FEED_ID.to_owned()),
+            Json(status_request(FeedStatus::Active)),
+        )
+        .await;
+        assert!(resume_result.is_ok());
+
+        let resumed_feed = state.store.get_feed(FEED_ID).await.unwrap().unwrap();
+        assert_eq!(resumed_feed.status, FeedStatus::Active);
+
+        let after_resume: DateTime<FixedOffset> = Utc::now().into();
+        let upcoming = state
+            .store
+            .get_unreleased_segments_for_feed(FEED_ID, after_resume, UNRELEASED_LIMIT)
+            .await
+            .unwrap();
+        assert_eq!(upcoming.len(), 2);
+
+        let far_future = after_resume + Duration::days(30);
+        let released_count = state
+            .store
+            .count_released_segments(FEED_ID, far_future)
+            .await
+            .unwrap();
+        assert_eq!(released_count, SEGMENT_COUNT);
+    }
 }

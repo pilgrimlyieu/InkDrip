@@ -13,7 +13,7 @@ use inkdrip_core::undo::{FeedSnapshot, HistoryPayload};
 use crate::error::{ApiError, ApiResult};
 use crate::state::AppState;
 
-use super::check_auth;
+use super::{check_auth, replace_future_releases};
 
 /// DELETE /api/history — Clear all undo/redo history and purge soft-deleted resources.
 ///
@@ -266,22 +266,15 @@ async fn restore_future_releases(
     feed_id: &str,
     releases: &[SegmentRelease],
 ) -> ApiResult<()> {
-    // Delete current future releases, then restore the saved ones
     let now: chrono::DateTime<chrono::FixedOffset> = chrono::Utc::now().into();
-    state
-        .store
-        .delete_future_releases_for_feed(feed_id, now)
-        .await?;
-    // Save the snapshot of releases (filtering to future only)
+
+    // Restore only future rows from the snapshot.
     let future: Vec<_> = releases
         .iter()
         .filter(|r| r.release_at > now)
         .cloned()
         .collect();
-    if !future.is_empty() {
-        state.store.save_releases(&future).await?;
-    }
-    Ok(())
+    replace_future_releases(state, feed_id, now, &future).await
 }
 
 /// Push an undo entry, logging a warning on failure rather than propagating.

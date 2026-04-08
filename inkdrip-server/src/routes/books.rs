@@ -21,6 +21,7 @@ use inkdrip_core::util;
 use super::check_auth;
 use super::compute_next_delivery;
 use super::history::push_history;
+use super::replace_future_releases;
 use crate::error::{ApiError, ApiResult};
 use crate::state::AppState;
 
@@ -329,17 +330,14 @@ pub async fn resplit_book(
     // Reschedule each feed for the new segments
     let feeds = state.store.list_feeds_for_book(&id).await?;
     for feed in &feeds {
-        state
-            .store
-            .delete_future_releases_for_feed(&feed.id, now)
-            .await?;
-
-        if !new_segments.is_empty() {
+        let releases = if new_segments.is_empty() {
+            Vec::new()
+        } else {
             let mut config = feed.schedule_config.clone();
             config.start_at = compute_next_delivery(&config);
-            let releases = scheduler::compute_release_schedule(&new_segments, &config, &feed.id);
-            state.store.save_releases(&releases).await?;
-        }
+            scheduler::compute_release_schedule(&new_segments, &config, &feed.id)
+        };
+        replace_future_releases(&state, &feed.id, now, &releases).await?;
     }
 
     tracing::info!(
